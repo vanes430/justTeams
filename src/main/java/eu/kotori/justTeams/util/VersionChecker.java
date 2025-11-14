@@ -1,4 +1,5 @@
 package eu.kotori.justTeams.util;
+
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import eu.kotori.justTeams.JustTeams;
@@ -7,34 +8,63 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
+
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
-import java.net.URL;
+import java.net.URI;
+
 public class VersionChecker implements Listener {
+
     private final JustTeams plugin;
+    private final String currentVersion;
+    private final String apiUrl;
+
     public VersionChecker(JustTeams plugin) {
         this.plugin = plugin;
+        this.currentVersion = plugin.getDescription().getVersion();
+        this.apiUrl = "https://api.kotori.ink/v1/version?product=justTeams";
         this.plugin.getServer().getPluginManager().registerEvents(this, plugin);
     }
+
     public void check() {
         plugin.getTaskRunner().runAsync(() -> {
             try {
-                URL url = new URL("https://api.github.com/repos/SpigotMC/Spigot/commits/master?per_page=1");
-                HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+                plugin.getLogger().info("Checking for updates...");
+                URI uri = URI.create(this.apiUrl);
+                HttpURLConnection connection = (HttpURLConnection) uri.toURL().openConnection();
                 connection.setRequestMethod("GET");
-                connection.connect();
-                if (connection.getResponseCode() == 200) {
-                    JsonObject jsonObject = JsonParser.parseReader(new InputStreamReader(connection.getInputStream())).getAsJsonObject();
-                    String latestTag = jsonObject.get("tag_name").getAsString();
-                    String currentVersion = plugin.getDescription().getVersion();
-                    if (!latestTag.equalsIgnoreCase(currentVersion)) {
-                        plugin.updateAvailable = true;
-                        plugin.latestVersion = latestTag;
-                        plugin.getLogger().info("A new version is available: " + latestTag);
+                connection.setConnectTimeout(10000);
+                connection.setReadTimeout(10000);
+                connection.setRequestProperty("User-Agent", "JustTeams Version Checker");
+
+                int responseCode = connection.getResponseCode();
+                if (responseCode == HttpURLConnection.HTTP_OK) {
+                    try (InputStreamReader reader = new InputStreamReader(connection.getInputStream())) {
+                        JsonObject jsonObject = JsonParser.parseReader(reader).getAsJsonObject();
+                        String latestVersion = jsonObject.get("version").getAsString();
+
+                        plugin.getLogger().info("Current version: " + currentVersion + " | Latest version: " + latestVersion);
+
+                        if (!currentVersion.equalsIgnoreCase(latestVersion)) {
+                            plugin.updateAvailable = true;
+                            plugin.latestVersion = latestVersion;
+                            plugin.getLogger().info("A new version is available: " + latestVersion);
+                            StartupMessage.sendUpdateNotification(plugin);
+                        } else {
+                            plugin.updateAvailable = false;
+                            plugin.getLogger().info("You are running the latest version!");
+                        }
                     }
+                } else {
+                    plugin.getLogger().warning("Version check failed with response code: " + responseCode);
                 }
+                connection.disconnect();
+
             } catch (Exception e) {
                 plugin.getLogger().warning("Could not check for updates: " + e.getMessage());
+                if (plugin.getConfigManager().isDebugLoggingEnabled()) {
+                    e.printStackTrace();
+                }
             }
         });
     }
@@ -43,16 +73,9 @@ public class VersionChecker implements Listener {
         Player player = event.getPlayer();
         if (player.hasPermission("justteams.admin") && plugin.updateAvailable) {
             plugin.getTaskRunner().runEntityTaskLater(player, () -> {
-                plugin.getMessageManager().sendRawMessage(player,
-                        "<strikethrough><dark_gray>⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯</strikethrough>\n" +
-                                " \n" +
-                                "  <gradient:#4C9DDE:#4C96D2><bold>JustTeams</bold></gradient>\n" +
-                                "  <gray>A new version is available: <green><latest_version></green>\n" +
-                                "  <click:open_url:https://www.spigotmc.org/resources/justteams.123456/updates>Download</click>\n" +
-                                " \n" +
-                                "<strikethrough><dark_gray>⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯</strikethrough>",
-                        Placeholder.unparsed("latest_version", plugin.latestVersion)
-                );
+                if (player.isOnline()) {
+                    StartupMessage.sendUpdateNotification(player, plugin);
+                }
             }, 60L);
         }
     }

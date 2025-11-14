@@ -37,7 +37,7 @@ public class LeaderboardViewGUI implements InventoryHolder {
                 .build();
         for (int i = 0; i < 9; i++) inventory.setItem(i, border);
         for (int i = 45; i < 54; i++) inventory.setItem(i, border);
-        int[] slots = { 19, 20, 21, 22, 23, 24, 25, 28, 29, 30, 31, 32, 33, 34 };
+        int[] slots = { 10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25 };
         int slotIndex = 0;
         for (Map.Entry<Integer, Team> entry : topTeams.entrySet()) {
             if (slotIndex >= slots.length) break;

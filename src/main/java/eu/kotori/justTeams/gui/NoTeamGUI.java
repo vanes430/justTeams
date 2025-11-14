@@ -10,6 +10,9 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.NotNull;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Collectors;
 public class NoTeamGUI implements IRefreshableGUI, InventoryHolder {
     private final JustTeams plugin;
     private final Player viewer;
@@ -42,6 +45,8 @@ public class NoTeamGUI implements IRefreshableGUI, InventoryHolder {
                 }
             }
         }
+        
+        loadCustomDummyItems(guiConfig);
     }
     private void setItemFromConfig(ConfigurationSection itemsSection, String key) {
         ConfigurationSection itemConfig = itemsSection.getConfigurationSection(key);
@@ -52,6 +57,11 @@ public class NoTeamGUI implements IRefreshableGUI, InventoryHolder {
         java.util.List<String> lore = itemConfig.getStringList("lore");
         inventory.setItem(slot, new ItemBuilder(material).withName(name).withLore(lore).withAction(key).build());
     }
+    
+    private void loadCustomDummyItems(ConfigurationSection guiConfig) {
+        GUIManager.loadDummyItems(inventory, guiConfig);
+    }
+    
     public void open() {
         viewer.openInventory(inventory);
     }

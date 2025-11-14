@@ -246,4 +246,64 @@ public class GUIManager {
         }
         return java.util.Collections.emptyList();
     }
+
+    public static void loadDummyItems(org.bukkit.inventory.Inventory inventory, ConfigurationSection guiConfig) {
+        if (guiConfig == null) return;
+        
+        ConfigurationSection dummyItemsSection = guiConfig.getConfigurationSection("dummy-items");
+        if (dummyItemsSection == null) {
+            return;
+        }
+        
+        for (String key : dummyItemsSection.getKeys(false)) {
+            ConfigurationSection itemConfig = dummyItemsSection.getConfigurationSection(key);
+            if (itemConfig == null) continue;
+            
+            Object slotsObj = itemConfig.get("slot");
+            java.util.List<Integer> slots = new java.util.ArrayList<>();
+            
+            if (slotsObj instanceof Integer) {
+                slots.add((Integer) slotsObj);
+            } else if (slotsObj instanceof List<?>) {
+                for (Object slotObj : (List<?>) slotsObj) {
+                    if (slotObj instanceof Integer) {
+                        slots.add((Integer) slotObj);
+                    }
+                }
+            }
+            
+            if (slots.isEmpty()) continue;
+            
+            Material material = Material.matchMaterial(itemConfig.getString("material", "STONE"));
+            if (material == null) material = Material.STONE;
+            
+            eu.kotori.justTeams.util.ItemBuilder builder = new eu.kotori.justTeams.util.ItemBuilder(material);
+            
+            String name = itemConfig.getString("name", "");
+            if (!name.isEmpty()) {
+                builder.withName(name);
+            }
+            
+            List<String> lore = itemConfig.getStringList("lore");
+            if (!lore.isEmpty()) {
+                builder.withLore(lore);
+            }
+            
+            if (itemConfig.contains("custom-model-data")) {
+                builder.withCustomModelData(itemConfig.getInt("custom-model-data"));
+            }
+            
+            if (itemConfig.getBoolean("enchanted", false)) {
+                builder.withEnchantmentGlint();
+            }
+            
+            org.bukkit.inventory.ItemStack dummyItem = builder.build();
+            
+            for (int slot : slots) {
+                if (slot >= 0 && slot < inventory.getSize()) {
+                    inventory.setItem(slot, dummyItem);
+                }
+            }
+        }
+    }
 }

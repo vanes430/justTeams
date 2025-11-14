@@ -6,6 +6,7 @@ import eu.kotori.justTeams.team.TeamManager;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -61,17 +62,89 @@ public class TeamMessageCommand implements CommandExecutor, TabCompleter {
             return true;
         }
         String format = messageManager.getRawMessage("team_chat_format");
-        Component formattedMessage = miniMessage.deserialize(format,
-                Placeholder.unparsed("player", player.getName()),
-                Placeholder.unparsed("team_name", team.getName()),
-                Placeholder.unparsed("message", message)
-        );
+        
+        String playerPrefix = JustTeams.getInstance().getPlayerPrefix(player);
+        String playerSuffix = JustTeams.getInstance().getPlayerSuffix(player);
+        
+    Component prefixComponent = (playerPrefix != null && !playerPrefix.isEmpty())
+        ? LegacyComponentSerializer.legacyAmpersand().deserialize(playerPrefix)
+        : Component.empty();
+    Component suffixComponent = (playerSuffix != null && !playerSuffix.isEmpty())
+        ? LegacyComponentSerializer.legacyAmpersand().deserialize(playerSuffix)
+        : Component.empty();
+
+    Component formattedMessage = miniMessage.deserialize(format,
+        Placeholder.unparsed("player", player.getName()),
+        Placeholder.component("prefix", prefixComponent),
+        Placeholder.component("player_prefix", prefixComponent),
+        Placeholder.component("suffix", suffixComponent),
+        Placeholder.component("player_suffix", suffixComponent),
+        Placeholder.unparsed("team_name", team.getName()),
+        Placeholder.unparsed("message", message)
+    );
+        
         team.getMembers().stream()
                 .map(member -> member.getBukkitPlayer())
                 .filter(onlinePlayer -> onlinePlayer != null)
                 .forEach(onlinePlayer -> onlinePlayer.sendMessage(formattedMessage));
+        
+        if (JustTeams.getInstance().getConfigManager().isCrossServerSyncEnabled()) {
+            JustTeams.getInstance().getTaskRunner().runAsync(() -> {
+                try {
+                    String currentServer = JustTeams.getInstance().getConfigManager().getServerIdentifier();
+                    
+                    if (JustTeams.getInstance().getConfigManager().isRedisEnabled() &&
+                        JustTeams.getInstance().getRedisManager().isAvailable()) {
+                        
+                        JustTeams.getInstance().getRedisManager().publishTeamMessage(
+                            team.getId(),
+                            player.getUniqueId().toString(),
+                            player.getName(),
+                            message
+                        ).thenAccept(success -> {
+                            if (success) {
+                                JustTeams.getInstance().getLogger().info(
+                                    "✓ Team message sent via Redis (instant)");
+                            } else {
+                                JustTeams.getInstance().getLogger().warning(
+                                    "Redis publish failed, storing in MySQL for polling");
+                                storeMessageToMySQL(team.getId(), player.getUniqueId().toString(), 
+                                                  message, currentServer);
+                            }
+                        }).exceptionally(ex -> {
+                            JustTeams.getInstance().getLogger().warning(
+                                "Redis error: " + ex.getMessage() + ", using MySQL fallback");
+                            storeMessageToMySQL(team.getId(), player.getUniqueId().toString(), 
+                                              message, currentServer);
+                            return null;
+                        });
+                    } else {
+                        storeMessageToMySQL(team.getId(), player.getUniqueId().toString(), 
+                                          message, currentServer);
+                    }
+                } catch (Exception e) {
+                    JustTeams.getInstance().getLogger().warning("Failed to send cross-server message: " + e.getMessage());
+                }
+            });
+        }
+        
         return true;
     }
+    
+    private void storeMessageToMySQL(int teamId, String playerUuid, String message, String sourceServer) {
+        try {
+            JustTeams.getInstance().getStorageManager().getStorage().addCrossServerMessage(
+                teamId,
+                playerUuid,
+                message,
+                sourceServer 
+            );
+        } catch (Exception e) {
+            JustTeams.getInstance().getLogger().warning(
+                "Failed to store message to MySQL: " + e.getMessage());
+        }
+    }
+    
     public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias, @NotNull String[] args) {
         return new ArrayList<>();
     }

@@ -3,7 +3,6 @@ package eu.kotori.justTeams.util;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import eu.kotori.justTeams.JustTeams;
-import eu.kotori.justTeams.team.Team;
 import eu.kotori.justTeams.team.BlacklistedPlayer;
 import java.util.List;
 import java.util.UUID;

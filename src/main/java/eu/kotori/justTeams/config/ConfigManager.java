@@ -23,6 +23,9 @@ public class ConfigManager {
     public int getInt(String path, int defaultValue) {
         return config.getInt(path, defaultValue);
     }
+    public boolean getBoolean(String path, boolean defaultValue) {
+        return config.getBoolean(path, defaultValue);
+    }
     public String getServerIdentifier() {
         return config.getString("settings.server-identifier", "survival");
     }
@@ -194,6 +197,44 @@ public class ConfigManager {
     public int getMySQLSocketTimeout() {
         return config.getInt("storage.mysql.socket_timeout", 60000);
     }
+    
+    public boolean isRedisEnabled() {
+        return config.getBoolean("redis.enabled", false);
+    }
+    
+    public String getRedisHost() {
+        return config.getString("redis.host", "localhost");
+    }
+    
+    public int getRedisPort() {
+        return config.getInt("redis.port", 6379);
+    }
+    
+    public String getRedisPassword() {
+        return config.getString("redis.password", "");
+    }
+    
+    public boolean isRedisSslEnabled() {
+        return config.getBoolean("redis.use_ssl", false);
+    }
+    
+    public int getRedisTimeout() {
+        return config.getInt("redis.timeout", 5000);
+    }
+    
+    public int getRedisPoolMaxTotal() {
+        return config.getInt("redis.pool.max_total", 20);
+    }
+    
+    public int getRedisPoolMaxIdle() {
+        return config.getInt("redis.pool.max_idle", 10);
+    }
+    
+    public int getRedisPoolMinIdle() {
+        return config.getInt("redis.pool.min_idle", 2);
+    }
+    
+    
     public boolean isBankEnabled() {
         return config.getBoolean("team_bank.enabled", true);
     }
@@ -223,9 +264,6 @@ public class ConfigManager {
     }
     public double getDouble(String path, double defaultValue) {
         return config.getDouble(path, defaultValue);
-    }
-    public boolean getBoolean(String path, boolean defaultValue) {
-        return config.getBoolean(path, defaultValue);
     }
     public long getLong(String path, long defaultValue) {
         return config.getLong(path, defaultValue);
@@ -285,7 +323,7 @@ public class ConfigManager {
         return config.getInt("team_warps.max_password_length", 20);
     }
     public boolean isTeamEnderchestEnabled() {
-        return isFeatureEnabled("team_enderchest");
+        return isFeatureEnabled("team_enderchest") && config.getBoolean("team_enderchest.enabled", true);
     }
     public int getEnderchestRows() {
         return config.getInt("team_enderchest.rows", 3);
@@ -451,5 +489,75 @@ public class ConfigManager {
     }
     public boolean isTeamMessageCommandEnabled() {
         return isFeatureEnabled("team_message_command");
+    }
+
+    public boolean isWorldRestrictionsEnabled() {
+        return config.getBoolean("world_restrictions.enabled", true);
+    }
+
+    public boolean isFeatureDisabledInWorld(String feature, String worldName) {
+        if (!isWorldRestrictionsEnabled()) {
+            return false;
+        }
+        List<String> disabledWorlds = config.getStringList("world_restrictions.disabled_worlds." + feature);
+        return disabledWorlds.contains(worldName);
+    }
+
+    public List<String> getDisabledWorldsForFeature(String feature) {
+        return config.getStringList("world_restrictions.disabled_worlds." + feature);
+    }
+
+    public boolean isSetHomeDisabledInWorld(String worldName) {
+        return isFeatureDisabledInWorld("sethome", worldName);
+    }
+
+    public boolean isSetWarpDisabledInWorld(String worldName) {
+        return isFeatureDisabledInWorld("setwarp", worldName);
+    }
+
+    public boolean isHomeDisabledInWorld(String worldName) {
+        return isFeatureDisabledInWorld("home", worldName);
+    }
+
+    public boolean isWarpDisabledInWorld(String worldName) {
+        return isFeatureDisabledInWorld("warp", worldName);
+    }
+
+
+    public boolean isFeatureCostsEnabled() {
+        return config.getBoolean("feature_costs.enabled", true);
+    }
+
+    public boolean isEconomyCostsEnabled() {
+        return isFeatureCostsEnabled() && config.getBoolean("feature_costs.economy.enabled", true);
+    }
+
+    public boolean isItemCostsEnabled() {
+        return isFeatureCostsEnabled() && config.getBoolean("feature_costs.items.enabled", false);
+    }
+
+    public double getFeatureEconomyCost(String feature) {
+        return config.getDouble("feature_costs.economy." + feature, 0.0);
+    }
+
+    public List<String> getFeatureItemCosts(String feature) {
+        return config.getStringList("feature_costs.items." + feature);
+    }
+
+    public boolean shouldConsumeItemsOnUse() {
+        return config.getBoolean("feature_costs.items.consume_on_use", true);
+    }
+
+    public boolean areFormattingCodesAllowed() {
+        return config.getBoolean("allow_formatting_codes", true);
+    }
+
+    public List<String> getBlockedFormattingCodes() {
+        return config.getStringList("blocked_formatting_codes");
+    }
+
+    public boolean isFormattingCodeBlocked(String code) {
+        List<String> blockedCodes = getBlockedFormattingCodes();
+        return blockedCodes.contains(code.toLowerCase());
     }
 }

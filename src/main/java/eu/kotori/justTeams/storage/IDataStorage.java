@@ -16,13 +16,16 @@ public interface IDataStorage {
     record TeamEnderChestLock(int teamId, String serverName, Timestamp lockTime) {}
     record CrossServerUpdate(int id, int teamId, String updateType, String playerUuid, String serverName, Timestamp timestamp) {}
     record CrossServerMessage(int id, int teamId, String playerUuid, String message, String serverName, Timestamp timestamp) {}
+    record TeamInvite(int teamId, String teamName, UUID inviterUuid, String inviterName, Timestamp createdAt) {}
+    record PlayerSession(UUID playerUuid, String serverName, Timestamp lastSeen) {}
+    
     boolean init();
     void shutdown();
     void cleanup();
     boolean isConnected();
     Optional<Team> createTeam(String name, String tag, UUID ownerUuid, boolean defaultPvpStatus, boolean defaultPublicStatus);
     void deleteTeam(int teamId);
-    void addMemberToTeam(int teamId, UUID playerUuid);
+    boolean addMemberToTeam(int teamId, UUID playerUuid);
     void removeMemberFromTeam(UUID playerUuid);
     Optional<Team> findTeamByPlayer(UUID playerUuid);
     Optional<Team> findTeamByName(String name);
@@ -42,6 +45,7 @@ public interface IDataStorage {
     void saveEnderChest(int teamId, String serializedInventory);
     String getEnderChest(int teamId);
     void updateMemberPermissions(int teamId, UUID memberUuid, boolean canWithdraw, boolean canUseEnderChest, boolean canSetHome, boolean canUseHome) throws SQLException;
+    void updateMemberPermission(int teamId, UUID memberUuid, String permission, boolean value) throws SQLException;
     void updateMemberRole(int teamId, UUID memberUuid, TeamRole role);
     void updateMemberEditingPermissions(int teamId, UUID memberUuid, boolean canEditMembers, boolean canEditCoOwners, boolean canKickMembers, boolean canPromoteMembers, boolean canDemoteMembers);
     Map<Integer, Team> getTopTeamsByKills(int limit);
@@ -82,4 +86,29 @@ public interface IDataStorage {
     boolean removePlayerFromBlacklist(int teamId, UUID playerUuid) throws SQLException;
     boolean isPlayerBlacklisted(int teamId, UUID playerUuid) throws SQLException;
     List<BlacklistedPlayer> getTeamBlacklist(int teamId) throws SQLException;
+    
+    Optional<UUID> getPlayerUuidByName(String playerName);
+    void cachePlayerName(UUID playerUuid, String playerName);
+    Optional<String> getPlayerNameByUuid(UUID playerUuid);
+    
+    void addTeamInvite(int teamId, UUID playerUuid, UUID inviterUuid);
+    void removeTeamInvite(int teamId, UUID playerUuid);
+    boolean hasTeamInvite(int teamId, UUID playerUuid);
+    List<Integer> getPlayerInvites(UUID playerUuid);
+    List<TeamInvite> getPlayerInvitesWithDetails(UUID playerUuid);
+    void clearPlayerInvites(UUID playerUuid);
+    
+    void updatePlayerSession(UUID playerUuid, String serverName);
+    Optional<PlayerSession> getPlayerSession(UUID playerUuid);
+    Map<UUID, PlayerSession> getTeamPlayerSessions(int teamId);
+    void cleanupStaleSessions(int minutesOld);
+    
+    void setServerAlias(String serverName, String alias);
+    Optional<String> getServerAlias(String serverName);
+    Map<String, String> getAllServerAliases();
+    void removeServerAlias(String serverName);
+    
+    void setTeamRenameTimestamp(int teamId, Timestamp timestamp);
+    Optional<Timestamp> getTeamRenameTimestamp(int teamId);
+    void setTeamName(int teamId, String newName);
 }

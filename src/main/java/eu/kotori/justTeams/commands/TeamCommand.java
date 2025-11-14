@@ -14,6 +14,7 @@ import eu.kotori.justTeams.storage.DatabaseStorage;
 import eu.kotori.justTeams.util.ConfigUpdater;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Bukkit;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -24,10 +25,12 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.sql.Timestamp;
 import eu.kotori.justTeams.team.TeamPlayer;
 import eu.kotori.justTeams.team.BlacklistedPlayer;
 public class TeamCommand implements CommandExecutor, TabCompleter {
@@ -46,6 +49,11 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
         }, 20L * 60, 20L * 60);
     }
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (args.length > 0 && args[0].equalsIgnoreCase("reload")) {
+            handleReload(sender);
+            return true;
+        }
+        
         if (!(sender instanceof Player player)) {
             plugin.getMessageManager().sendMessage(sender, "player_only");
             return true;
@@ -63,6 +71,7 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
             case "create" -> handleCreate(player, args);
             case "disband" -> handleDisband(player);
             case "invite" -> handleInvite(player, args);
+            case "invites" -> handleInvites(player);
             case "accept" -> handleAccept(player, args);
             case "deny" -> handleDeny(player, args);
             case "join" -> handleJoin(player, args);
@@ -77,6 +86,7 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
             case "home" -> handleHome(player);
             case "settag" -> handleSetTag(player, args);
             case "setdesc" -> handleSetDescription(player, args);
+            case "rename" -> handleRename(player, args);
             case "transfer" -> handleTransfer(player, args);
             case "pvp" -> handlePvpToggle(player);
             case "bank" -> handleBank(player, args);
@@ -92,10 +102,11 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
             case "settings" -> handleSettings(player);
             case "top" -> handleTop(player, args);
             case "admin" -> handleAdmin(player, args);
+            case "serveralias" -> handleServerAlias(player, args);
             case "platform" -> handlePlatform(player);
-            case "reload" -> handleReload(player);
             case "help" -> handleHelp(player);
             case "chat" -> handleChat(player);
+            case "chatspy", "spy" -> handleChatSpy(player);
             case "debug-permissions" -> {
                 if (!hasAdminPermission(player)) {
                     return false;
@@ -199,25 +210,71 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
         }
         String plainName = stripColorCodes(name);
         String plainTag = stripColorCodes(tag);
+        
         if (!plainName.matches("^[a-zA-Z0-9_]+$")) {
             return false;
         }
         if (!plainTag.matches("^[a-zA-Z0-9_]+$")) {
             return false;
         }
+        
+        if (plainName.matches("^[0-9_]+$") || plainTag.matches("^[0-9_]+$")) {
+            return false;
+        }
+        
+        String[] sqlPatterns = {"--", ";", "/*", "*/", "xp_", "sp_", "union", "select", "insert", "update", "delete", "drop", "create"};
         String lowerName = plainName.toLowerCase();
         String lowerTag = plainTag.toLowerCase();
-        String[] inappropriate = {"admin", "mod", "staff", "owner", "server", "minecraft", "bukkit", "spigot"};
+        
+        for (String pattern : sqlPatterns) {
+            if (lowerName.contains(pattern) || lowerTag.contains(pattern)) {
+                plugin.getLogger().warning("Potential SQL injection attempt detected in team name/tag: " + name + "/" + tag);
+                return false;
+            }
+        }
+        
+        String[] inappropriate = {"admin", "mod", "staff", "owner", "server", "minecraft", "bukkit", "spigot", "console", "system", "root"};
         for (String word : inappropriate) {
             if (lowerName.contains(word) || lowerTag.contains(word)) {
                 return false;
             }
         }
+        
         return true;
     }
+    
     private String stripColorCodes(String text) {
         if (text == null) return "";
-        return text.replaceAll("(?i)&[0-9A-FK-OR]", "").replaceAll("(?i)<#[0-9A-F]{6}>", "").replaceAll("(?i)</#[0-9A-F]{6}>", "");
+        text = text.replaceAll("(?i)&[0-9A-FK-OR]", "");
+        text = text.replaceAll("(?i)<#[0-9A-F]{6}>", "");
+        text = text.replaceAll("(?i)</#[0-9A-F]{6}>", "");
+        text = text.replaceAll("(?i)<[^>]+>", "");
+        return text.trim();
+    }
+    
+    private boolean isValidPlayerName(String name) {
+        if (name == null || name.isEmpty()) {
+            return false;
+        }
+        
+        int minLength = plugin.getConfigManager().getMinNameLength();
+        int maxLength = plugin.getConfigManager().getMaxNameLength();
+        
+        if (name.length() < minLength || name.length() > maxLength) {
+            return false;
+        }
+        
+        if (!name.matches("^[a-zA-Z0-9_.]+$")) {
+            return false;
+        }
+        
+        String lowerName = name.toLowerCase();
+        if (lowerName.contains("--") || lowerName.contains(";") || lowerName.contains("'") || lowerName.contains("\"")) {
+            plugin.getLogger().warning("Potential injection attempt in player name: " + name);
+            return false;
+        }
+        
+        return true;
     }
     private void handleGUI(Player player) {
         Team team = teamManager.getPlayerTeam(player.getUniqueId());
@@ -231,16 +288,41 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
         if (!checkFeatureEnabled(player, "team_creation")) {
             return;
         }
-        if (args.length < 3) {
+        
+        boolean tagEnabled = plugin.getConfigManager().isTeamTagEnabled();
+        
+        if (tagEnabled && args.length < 3) {
             plugin.getMessageManager().sendMessage(player, "usage_create");
             return;
-        }
-        String teamName = args[1];
-        String teamTag = args[2];
-        if (!validateTeamNameAndTag(teamName, teamTag)) {
-            plugin.getMessageManager().sendMessage(player, "invalid_team_name_or_tag");
+        } else if (!tagEnabled && args.length < 2) {
+            plugin.getMessageManager().sendMessage(player, "usage_create_no_tag");
             return;
         }
+        
+        String teamName = args[1];
+        String teamTag = tagEnabled && args.length >= 3 ? args[2] : "";
+        
+        if (tagEnabled) {
+            if (!validateTeamNameAndTag(teamName, teamTag)) {
+                plugin.getMessageManager().sendMessage(player, "invalid_team_name_or_tag");
+                return;
+            }
+        } else {
+            String plainName = stripColorCodes(teamName);
+            if (!plainName.matches("^[a-zA-Z0-9_]+$")) {
+                plugin.getMessageManager().sendMessage(player, "invalid_team_name");
+                return;
+            }
+            String lowerName = plainName.toLowerCase();
+            String[] inappropriate = {"admin", "mod", "staff", "owner", "server", "minecraft", "bukkit", "spigot"};
+            for (String word : inappropriate) {
+                if (lowerName.contains(word)) {
+                    plugin.getMessageManager().sendMessage(player, "invalid_team_name");
+                    return;
+                }
+            }
+        }
+        
         if (teamManager.getPlayerTeam(player.getUniqueId()) != null) {
             plugin.getMessageManager().sendMessage(player, "already_in_team");
             return;
@@ -271,26 +353,84 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
             return;
         }
         String targetName = args[1];
+        
+        if (!isValidPlayerName(targetName)) {
+            plugin.getMessageManager().sendMessage(player, "invalid_player_name");
+            return;
+        }
+        
         if (targetName.equalsIgnoreCase(player.getName())) {
             plugin.getMessageManager().sendMessage(player, "cannot_invite_yourself");
             return;
         }
-        if (targetName.length() < plugin.getConfigManager().getMinNameLength() || targetName.length() > plugin.getConfigManager().getMaxNameLength() || !targetName.matches("^[a-zA-Z0-9_]+$")) {
-            plugin.getMessageManager().sendMessage(player, "invalid_player_name");
-            return;
-        }
+        
         Player target = Bukkit.getPlayer(targetName);
-        if (target == null) {
-            plugin.getMessageManager().sendMessage(player, "player_not_found", Placeholder.unparsed("target", targetName));
+        if (target != null && target.isOnline()) {
+            if (teamManager.getPlayerTeam(target.getUniqueId()) != null) {
+                plugin.getMessageManager().sendMessage(player, "player_already_in_team",
+                    net.kyori.adventure.text.minimessage.tag.resolver.Placeholder.unparsed("target", target.getName()));
+                return;
+            }
+            teamManager.invitePlayer(player, target);
             return;
         }
-        if (teamManager.getPlayerTeam(target.getUniqueId()) != null) {
-            plugin.getMessageManager().sendMessage(player, "player_already_in_team",
-                net.kyori.adventure.text.minimessage.tag.resolver.Placeholder.unparsed("target", target.getName()));
-            return;
-        }
-        teamManager.invitePlayer(player, target);
+        
+        plugin.getTaskRunner().runAsync(() -> {
+            plugin.getStorageManager().getStorage().cachePlayerName(player.getUniqueId(), player.getName());
+            
+            Optional<UUID> targetUuidOpt = plugin.getStorageManager().getStorage().getPlayerUuidByName(targetName);
+            
+            if (targetUuidOpt.isEmpty()) {
+                String normalizedName = plugin.getBedrockSupport().normalizePlayerName(targetName);
+                if (!normalizedName.equals(targetName)) {
+                    targetUuidOpt = plugin.getStorageManager().getStorage().getPlayerUuidByName(normalizedName);
+                }
+            }
+            
+            if (targetUuidOpt.isEmpty()) {
+                OfflinePlayer offlinePlayer = Bukkit.getOfflinePlayerIfCached(targetName);
+                if (offlinePlayer != null && offlinePlayer.hasPlayedBefore()) {
+                    UUID targetUuid = offlinePlayer.getUniqueId();
+                    plugin.getStorageManager().getStorage().cachePlayerName(targetUuid, targetName);
+                    String normalizedName = plugin.getBedrockSupport().normalizePlayerName(targetName);
+                    if (!normalizedName.equals(targetName)) {
+                        plugin.getStorageManager().getStorage().cachePlayerName(targetUuid, normalizedName);
+                    }
+                    targetUuidOpt = Optional.of(targetUuid);
+                } else {
+                    plugin.getTaskRunner().runOnEntity(player, () -> {
+                        plugin.getMessageManager().sendMessage(player, "player_not_found", 
+                            Placeholder.unparsed("target", targetName));
+                    });
+                    return;
+                }
+            }
+            
+            UUID targetUuid = targetUuidOpt.get();
+            
+            Optional<Team> existingTeam = plugin.getStorageManager().getStorage().findTeamByPlayer(targetUuid);
+            if (existingTeam.isPresent()) {
+                plugin.getTaskRunner().runOnEntity(player, () -> {
+                    plugin.getMessageManager().sendMessage(player, "player_already_in_team",
+                        net.kyori.adventure.text.minimessage.tag.resolver.Placeholder.unparsed("target", targetName));
+                });
+                return;
+            }
+            
+            plugin.getTaskRunner().runOnEntity(player, () -> {
+                teamManager.invitePlayerByUuid(player, targetUuid, targetName);
+            });
+        });
     }
+    
+    private void handleInvites(Player player) {
+        if (!checkFeatureEnabled(player, "team_invites")) {
+            return;
+        }
+        
+        new eu.kotori.justTeams.gui.InvitesGUI(plugin, player).open();
+    }
+    
     private void handleAccept(Player player, String[] args) {
         if (!checkFeatureEnabled(player, "team_invites")) {
             return;
@@ -300,15 +440,24 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
             return;
         }
         String teamName = args[1];
-        if (teamName.length() < plugin.getConfigManager().getMinNameLength() || teamName.length() > plugin.getConfigManager().getMaxNameLength() || !teamName.matches("^[a-zA-Z0-9_]+$")) {
+        
+        if (teamName == null || teamName.isEmpty() || teamName.length() < plugin.getConfigManager().getMinNameLength() 
+                || teamName.length() > plugin.getConfigManager().getMaxNameLength()) {
             plugin.getMessageManager().sendMessage(player, "invalid_team_name");
             return;
         }
+        
+        String plainTeamName = stripColorCodes(teamName);
+        if (plainTeamName.isEmpty() || !plainTeamName.matches("^[a-zA-Z0-9_]+$")) {
+            plugin.getMessageManager().sendMessage(player, "invalid_team_name");
+            return;
+        }
+        
         if (teamManager.getPlayerTeam(player.getUniqueId()) != null) {
             plugin.getMessageManager().sendMessage(player, "already_in_team");
             return;
         }
-        teamManager.acceptInvite(player, teamName);
+        teamManager.acceptInvite(player, plainTeamName);
     }
     private void handleDeny(Player player, String[] args) {
         if (!checkFeatureEnabled(player, "team_invites")) {
@@ -334,16 +483,26 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
             return;
         }
         String teamName = args[1];
-        if (teamName.length() < plugin.getConfigManager().getMinNameLength() || teamName.length() > plugin.getConfigManager().getMaxNameLength() || !teamName.matches("^[a-zA-Z0-9_]+$")) {
+        
+        if (teamName == null || teamName.isEmpty() || teamName.length() < plugin.getConfigManager().getMinNameLength() 
+                || teamName.length() > plugin.getConfigManager().getMaxNameLength()) {
             plugin.getMessageManager().sendMessage(player, "invalid_team_name");
             return;
         }
+        
+        String plainTeamName = stripColorCodes(teamName);
+        if (plainTeamName.isEmpty() || !plainTeamName.matches("^[a-zA-Z0-9_]+$")) {
+            plugin.getMessageManager().sendMessage(player, "invalid_team_name");
+            return;
+        }
+        
         if (teamManager.getPlayerTeam(player.getUniqueId()) != null) {
             plugin.getMessageManager().sendMessage(player, "already_in_team");
             return;
         }
-        teamManager.joinTeam(player, teamName);
+        teamManager.joinTeam(player, plainTeamName);
     }
+    
     private void handleKick(Player player, String[] args) {
         if (!checkFeatureEnabled(player, "member_kick")) {
             return;
@@ -353,15 +512,23 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
             return;
         }
         String targetName = args[1];
+        
+        if (!isValidPlayerName(targetName)) {
+            plugin.getMessageManager().sendMessage(player, "invalid_player_name");
+            return;
+        }
+        
         if (targetName.equalsIgnoreCase(player.getName())) {
             plugin.getMessageManager().sendMessage(player, "cannot_kick_yourself");
             return;
         }
+        
         Player target = Bukkit.getPlayer(targetName);
         if (target == null) {
             plugin.getMessageManager().sendMessage(player, "player_not_found", Placeholder.unparsed("target", targetName));
             return;
         }
+        
         Team playerTeam = teamManager.getPlayerTeam(player.getUniqueId());
         Team targetTeam = teamManager.getPlayerTeam(target.getUniqueId());
         if (playerTeam == null || targetTeam == null || playerTeam.getId() != targetTeam.getId()) {
@@ -464,7 +631,11 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
                 .filter(Objects::nonNull)
                 .collect(Collectors.joining(", "));
         plugin.getMessageManager().sendRawMessage(player, plugin.getMessageManager().getRawMessage("team_info_header"), Placeholder.unparsed("team", team.getName()));
-        plugin.getMessageManager().sendRawMessage(player, plugin.getMessageManager().getRawMessage("team_info_tag"), Placeholder.unparsed("tag", team.getTag()));
+        
+        if (plugin.getConfigManager().isTeamTagEnabled()) {
+            plugin.getMessageManager().sendRawMessage(player, plugin.getMessageManager().getRawMessage("team_info_tag"), Placeholder.unparsed("tag", team.getTag()));
+        }
+        
         plugin.getMessageManager().sendRawMessage(player, plugin.getMessageManager().getRawMessage("team_info_description"), Placeholder.unparsed("description", team.getDescription()));
         plugin.getMessageManager().sendRawMessage(player, plugin.getMessageManager().getRawMessage("team_info_owner"), Placeholder.unparsed("owner", safeOwnerName));
         if (!coOwners.isEmpty()) {
@@ -491,6 +662,14 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
         if (!checkFeatureEnabled(player, "team_home_set")) {
             return;
         }
+        
+        if (!plugin.getFeatureRestrictionManager().isFeatureAllowed(player, "sethome")) {
+            plugin.getMessageManager().sendMessage(player, "feature_disabled_in_world",
+                Placeholder.unparsed("feature", "sethome"),
+                Placeholder.unparsed("world", player.getWorld().getName()));
+            return;
+        }
+        
         Team team = teamManager.getPlayerTeam(player.getUniqueId());
         if (team == null) {
             plugin.getMessageManager().sendMessage(player, "player_not_in_team");
@@ -500,6 +679,11 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
             plugin.getMessageManager().sendMessage(player, "must_be_owner_or_co_owner");
             return;
         }
+        
+        if (!plugin.getFeatureRestrictionManager().canAffordAndPay(player, "sethome")) {
+            return; 
+        }
+        
         teamManager.setTeamHome(player);
     }
     private void handleDelHome(Player player) {
@@ -521,11 +705,24 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
         if (!checkFeatureEnabled(player, "team_home_teleport")) {
             return;
         }
+        
+        if (!plugin.getFeatureRestrictionManager().isFeatureAllowed(player, "home")) {
+            plugin.getMessageManager().sendMessage(player, "feature_disabled_in_world",
+                Placeholder.unparsed("feature", "home"),
+                Placeholder.unparsed("world", player.getWorld().getName()));
+            return;
+        }
+        
         Team team = teamManager.getPlayerTeam(player.getUniqueId());
         if (team == null) {
             plugin.getMessageManager().sendMessage(player, "player_not_in_team");
             return;
         }
+        
+        if (!plugin.getFeatureRestrictionManager().canAffordAndPay(player, "home")) {
+            return;
+        }
+        
         teamManager.teleportToHome(player);
     }
     private void handleSetTag(Player player, String[] args) {
@@ -567,6 +764,148 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
         }
         teamManager.setTeamDescription(player, description);
     }
+    
+    private void handleRename(Player player, String[] args) {
+        if (!checkFeatureEnabled(player, "team_rename")) {
+            return;
+        }
+        
+        if (!player.hasPermission("justteams.rename") && !player.hasPermission("justteams.admin")) {
+            plugin.getMessageManager().sendMessage(player, "no_permission");
+            return;
+        }
+        
+        if (args.length < 2) {
+            plugin.getMessageManager().sendMessage(player, "rename_usage");
+            return;
+        }
+        
+        Team team = teamManager.getPlayerTeam(player.getUniqueId());
+        if (team == null) {
+            plugin.getMessageManager().sendMessage(player, "not_in_team");
+            return;
+        }
+        
+        if (!team.isOwner(player.getUniqueId())) {
+            plugin.getMessageManager().sendMessage(player, "must_be_owner");
+            return;
+        }
+        
+        String newName = args[1];
+        String oldName = team.getName();
+        
+        if (newName.equalsIgnoreCase(oldName)) {
+            plugin.getMessageManager().sendMessage(player, "rename_same_name");
+            return;
+        }
+        
+        String plainName = stripColorCodes(newName);
+        int minLength = plugin.getConfigManager().getMinNameLength();
+        int maxLength = plugin.getConfigManager().getMaxNameLength();
+        
+        if (plainName.length() < minLength) {
+            plugin.getMessageManager().sendMessage(player, "name_too_short",
+                Placeholder.unparsed("min_length", String.valueOf(minLength)));
+            return;
+        }
+        
+        if (plainName.length() > maxLength) {
+            plugin.getMessageManager().sendMessage(player, "name_too_long",
+                Placeholder.unparsed("max_length", String.valueOf(maxLength)));
+            return;
+        }
+        
+        if (!plainName.matches("^[a-zA-Z0-9_]+$")) {
+            plugin.getMessageManager().sendMessage(player, "invalid_team_name");
+            return;
+        }
+        
+        if (teamManager.getTeamByName(newName) != null) {
+            plugin.getMessageManager().sendMessage(player, "team_name_exists",
+                Placeholder.unparsed("team", newName));
+            return;
+        }
+        
+        plugin.getTaskRunner().runAsync(() -> {
+            Optional<Timestamp> lastRename = plugin.getStorageManager().getStorage().getTeamRenameTimestamp(team.getId());
+            long cooldownSeconds = plugin.getConfig().getLong("settings.rename_cooldown", 604800);
+            
+            if (lastRename.isPresent() && cooldownSeconds > 0) {
+                long secondsSinceRename = (System.currentTimeMillis() - lastRename.get().getTime()) / 1000;
+                long remaining = cooldownSeconds - secondsSinceRename;
+                
+                if (remaining > 0) {
+                    String timeLeft = formatTime(remaining);
+                    plugin.getTaskRunner().runOnEntity(player, () -> {
+                        plugin.getMessageManager().sendMessage(player, "rename_cooldown",
+                            Placeholder.unparsed("time", timeLeft));
+                    });
+                    return;
+                }
+            }
+            
+            double cost = plugin.getConfig().getDouble("feature_costs.economy.rename", 500.0);
+            boolean economyEnabled = plugin.getConfig().getBoolean("feature_costs.economy.enabled", true);
+            
+            if (economyEnabled && cost > 0 && plugin.getEconomy() != null) {
+                double balance = plugin.getEconomy().getBalance(player);
+                if (balance < cost) {
+                    plugin.getTaskRunner().runOnEntity(player, () -> {
+                        plugin.getMessageManager().sendMessage(player, "rename_too_expensive",
+                            Placeholder.unparsed("cost", String.format("%.2f", cost)),
+                            Placeholder.unparsed("balance", String.format("%.2f", balance)));
+                    });
+                    return;
+                }
+                
+                plugin.getEconomy().withdrawPlayer(player, cost);
+            }
+            
+            team.setName(newName);
+            plugin.getStorageManager().getStorage().setTeamName(team.getId(), newName);
+            plugin.getStorageManager().getStorage().setTeamRenameTimestamp(team.getId(), new Timestamp(System.currentTimeMillis()));
+            
+            plugin.getWebhookHelper().sendTeamRenameWebhook(player.getName(), oldName, newName);
+            
+            plugin.getTaskRunner().runAsync(() -> {
+                if (plugin.getRedisManager() != null && plugin.getRedisManager().isAvailable()) {
+                    plugin.getRedisManager().publishTeamUpdate(team.getId(), "TEAM_RENAMED", 
+                        player.getUniqueId().toString(), oldName + "|" + newName);
+                }
+                
+                plugin.getStorageManager().getStorage().addCrossServerUpdate(team.getId(), "TEAM_RENAMED", 
+                    player.getUniqueId().toString(), "ALL_SERVERS");
+            });
+            
+            plugin.getTaskRunner().runOnEntity(player, () -> {
+                plugin.getMessageManager().sendMessage(player, "rename_success",
+                    Placeholder.unparsed("old_name", oldName),
+                    Placeholder.unparsed("new_name", newName));
+                
+                team.broadcast("rename_broadcast",
+                    Placeholder.unparsed("old_name", oldName),
+                    Placeholder.unparsed("new_name", newName));
+                
+                teamManager.refreshTeamGUIsForAllMembers(team);
+            });
+        });
+    }
+    
+    private String formatTime(long seconds) {
+        if (seconds < 60) {
+            return seconds + " second" + (seconds != 1 ? "s" : "");
+        } else if (seconds < 3600) {
+            long minutes = seconds / 60;
+            return minutes + " minute" + (minutes != 1 ? "s" : "");
+        } else if (seconds < 86400) {
+            long hours = seconds / 3600;
+            return hours + " hour" + (hours != 1 ? "s" : "");
+        } else {
+            long days = seconds / 86400;
+            return days + " day" + (days != 1 ? "s" : "");
+        }
+    }
+    
     private void handleTransfer(Player player, String[] args) {
         if (!checkFeatureEnabled(player, "team_transfer")) {
             return;
@@ -653,11 +992,24 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
         if (!checkFeatureEnabled(player, "team_enderchest")) {
             return;
         }
+        
+        if (!plugin.getFeatureRestrictionManager().isFeatureAllowed(player, "enderchest")) {
+            plugin.getMessageManager().sendMessage(player, "feature_disabled_in_world",
+                Placeholder.unparsed("feature", "enderchest"),
+                Placeholder.unparsed("world", player.getWorld().getName()));
+            return;
+        }
+        
         Team team = teamManager.getPlayerTeam(player.getUniqueId());
         if (team == null) {
             plugin.getMessageManager().sendMessage(player, "player_not_in_team");
             return;
         }
+        
+        if (!plugin.getFeatureRestrictionManager().canAffordAndPay(player, "enderchest")) {
+            return; 
+        }
+        
         teamManager.openEnderChest(player);
     }
     private void handlePublicToggle(Player player) {
@@ -694,6 +1046,13 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
         if (!checkFeatureEnabled(player, "team_warp_set")) {
             return;
         }
+        if (!plugin.getFeatureRestrictionManager().isFeatureAllowed(player, "setwarp")) {
+            plugin.getMessageManager().sendMessage(player, "feature_disabled_in_world",
+                Placeholder.unparsed("feature", "setwarp"),
+                Placeholder.unparsed("world", player.getWorld().getName()));
+            return;
+        }
+        
         if (args.length < 2) {
             plugin.getMessageManager().sendMessage(player, "usage_setwarp");
             return;
@@ -708,6 +1067,11 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
             plugin.getMessageManager().sendMessage(player, "invalid_warp_password");
             return;
         }
+        
+        if (!plugin.getFeatureRestrictionManager().canAffordAndPay(player, "setwarp")) {
+            return; 
+        }
+        
         teamManager.setTeamWarp(player, warpName, password);
     }
     private void handleDelWarp(Player player, String[] args) {
@@ -729,6 +1093,14 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
         if (!checkFeatureEnabled(player, "team_warp_teleport")) {
             return;
         }
+        
+        if (!plugin.getFeatureRestrictionManager().isFeatureAllowed(player, "warp")) {
+            plugin.getMessageManager().sendMessage(player, "feature_disabled_in_world",
+                Placeholder.unparsed("feature", "warp"),
+                Placeholder.unparsed("world", player.getWorld().getName()));
+            return;
+        }
+        
         if (args.length < 2) {
             plugin.getMessageManager().sendMessage(player, "usage_warp");
             return;
@@ -739,6 +1111,11 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
             return;
         }
         String password = args.length > 2 ? args[2] : null;
+        
+        if (!plugin.getFeatureRestrictionManager().canAffordAndPay(player, "warp")) {
+            return; 
+        }
+        
         teamManager.teleportToTeamWarp(player, warpName, password);
     }
     private void handleWarps(Player player) {
@@ -758,14 +1135,28 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
         }
         plugin.getTeamChatListener().toggleTeamChat(player);
     }
+
+    private void handleChatSpy(Player player) {
+        if (!player.hasPermission("justteams.chatspy")) {
+            plugin.getMessageManager().sendMessage(player, "no_permission");
+            return;
+        }
+        plugin.getTeamChatListener().toggleChatSpy(player);
+    }
     private void handleHelp(Player player) {
         plugin.getMessageManager().sendMessage(player, "help_header");
         plugin.getMessageManager().sendMessage(player, "help_format",
             Placeholder.unparsed("command", "gui"),
             Placeholder.unparsed("description", "Opens the team GUI."));
-        plugin.getMessageManager().sendMessage(player, "help_format",
-            Placeholder.unparsed("command", "create <name> <tag>"),
-            Placeholder.unparsed("description", "Creates a team."));
+        if (plugin.getConfigManager().isTeamTagEnabled()) {
+            plugin.getMessageManager().sendMessage(player, "help_format",
+                Placeholder.unparsed("command", "create <name> <tag>"),
+                Placeholder.unparsed("description", "Creates a team."));
+        } else {
+            plugin.getMessageManager().sendMessage(player, "help_format",
+                Placeholder.unparsed("command", "create <name>"),
+                Placeholder.unparsed("description", "Creates a team."));
+        }
         plugin.getMessageManager().sendMessage(player, "help_format",
             Placeholder.unparsed("command", "disband"),
             Placeholder.unparsed("description", "Disbands your team."));
@@ -799,12 +1190,23 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
         plugin.getMessageManager().sendMessage(player, "help_format",
             Placeholder.unparsed("command", "home"),
             Placeholder.unparsed("description", "Teleports to the team home."));
-        plugin.getMessageManager().sendMessage(player, "help_format",
-            Placeholder.unparsed("command", "settag <tag>"),
-            Placeholder.unparsed("description", "Changes the team tag."));
+        
+        if (plugin.getConfigManager().isTeamTagEnabled()) {
+            plugin.getMessageManager().sendMessage(player, "help_format",
+                Placeholder.unparsed("command", "settag <tag>"),
+                Placeholder.unparsed("description", "Changes the team tag."));
+        }
+        
         plugin.getMessageManager().sendMessage(player, "help_format",
             Placeholder.unparsed("command", "setdesc <description>"),
             Placeholder.unparsed("description", "Changes the team description."));
+        
+        if (plugin.getConfig().getBoolean("features.team_rename", true)) {
+            plugin.getMessageManager().sendMessage(player, "help_format",
+                Placeholder.unparsed("command", "rename <newName>"),
+                Placeholder.unparsed("description", "Renames the team (cooldown applies)."));
+        }
+        
         plugin.getMessageManager().sendMessage(player, "help_format",
             Placeholder.unparsed("command", "transfer <player>"),
             Placeholder.unparsed("description", "Transfers ownership."));
@@ -857,9 +1259,9 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
             Placeholder.unparsed("command", "debug-placeholders"),
             Placeholder.unparsed("description", "Tests all PlaceholderAPI placeholders for your team."));
     }
-    private void handleReload(Player player) {
-        if (!hasAdminPermission(player)) {
-            plugin.getMessageManager().sendMessage(player, "no_permission");
+    private void handleReload(CommandSender sender) {
+        if (sender instanceof Player player && !hasAdminPermission(player)) {
+            plugin.getMessageManager().sendMessage(sender, "no_permission");
             return;
         }
         try {
@@ -870,12 +1272,16 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
             plugin.getCommandManager().reload();
             plugin.getAliasManager().reload();
             plugin.getGuiConfigManager().testPlaceholders();
-            plugin.getMessageManager().sendMessage(player, "reload");
-            plugin.getMessageManager().sendMessage(player, "reload_commands_notice");
-            plugin.getLogger().info("JustTeams configuration reloaded successfully!");
+            
+            plugin.getMessageManager().sendMessage(sender, "reload");
+            if (sender instanceof Player) {
+                plugin.getMessageManager().sendMessage(sender, "reload_commands_notice");
+            }
+            plugin.getLogger().info("✓ JustTeams configuration reloaded successfully!");
         } catch (Exception e) {
-            plugin.getLogger().severe("Failed to reload configuration: " + e.getMessage());
-            player.sendMessage("§cFailed to reload configuration. Check console for details.");
+            plugin.getLogger().severe("✗ Failed to reload configuration: " + e.getMessage());
+            e.printStackTrace();
+            sender.sendMessage("§c✗ Failed to reload configuration. Check console for details.");
         }
     }
     private void handleBlacklist(Player player, String[] args) {
@@ -1103,10 +1509,12 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
         if (!hasAdminPermission(player)) {
             return;
         }
-        if (args.length < 2) {
-            player.sendMessage("§cUsage: /team admin <disband|testmigration|enderchest> [args]");
+        
+        if (args.length < 2 || args[1].equalsIgnoreCase("gui")) {
+            new eu.kotori.justTeams.gui.admin.AdminGUI(plugin, player).open();
             return;
         }
+        
         String action = args[1].toLowerCase();
         switch (action) {
             case "disband" -> {
@@ -1128,10 +1536,92 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
             case "testmigration" -> handleTestMigration(player, args);
             case "performance" -> handlePerformance(player, args);
             default -> {
-                player.sendMessage("§cUsage: /team admin <disband|testmigration|enderchest|performance> [args]");
+                player.sendMessage("§cUsage: /team admin <gui|disband|testmigration|enderchest|performance> [args]");
             }
         }
     }
+    
+    private void handleServerAlias(Player player, String[] args) {
+        if (!hasAdminPermission(player)) {
+            plugin.getMessageManager().sendMessage(player, "no_permission");
+            return;
+        }
+        
+        if (args.length < 2) {
+            plugin.getMessageManager().sendMessage(player, "usage_serveralias");
+            return;
+        }
+        
+        String action = args[1].toLowerCase();
+        
+        switch (action) {
+            case "set" -> {
+                if (args.length < 4) {
+                    plugin.getMessageManager().sendMessage(player, "usage_serveralias");
+                    return;
+                }
+                
+                String serverName = args[2];
+                String alias = String.join(" ", Arrays.copyOfRange(args, 3, args.length));
+                
+                if (alias.length() > 64) {
+                    player.sendMessage("§cServer alias too long! Maximum 64 characters.");
+                    return;
+                }
+                
+                plugin.getTaskRunner().runAsync(() -> {
+                    plugin.getStorageManager().getStorage().setServerAlias(serverName, alias);
+                    
+                    plugin.getTaskRunner().runOnEntity(player, () -> {
+                        plugin.getMessageManager().sendMessage(player, "serveralias_set",
+                            Placeholder.unparsed("server", serverName),
+                            Placeholder.unparsed("alias", alias));
+                    });
+                });
+            }
+            
+            case "remove" -> {
+                if (args.length < 3) {
+                    plugin.getMessageManager().sendMessage(player, "usage_serveralias");
+                    return;
+                }
+                
+                String serverName = args[2];
+                
+                plugin.getTaskRunner().runAsync(() -> {
+                    plugin.getStorageManager().getStorage().removeServerAlias(serverName);
+                    
+                    plugin.getTaskRunner().runOnEntity(player, () -> {
+                        plugin.getMessageManager().sendMessage(player, "serveralias_removed",
+                            Placeholder.unparsed("server", serverName));
+                    });
+                });
+            }
+            
+            case "list" -> {
+                plugin.getTaskRunner().runAsync(() -> {
+                    Map<String, String> aliases = plugin.getStorageManager().getStorage().getAllServerAliases();
+                    
+                    plugin.getTaskRunner().runOnEntity(player, () -> {
+                        if (aliases.isEmpty()) {
+                            player.sendMessage("§eNo server aliases configured.");
+                            return;
+                        }
+                        
+                        plugin.getMessageManager().sendMessage(player, "serveralias_list_header");
+                        for (Map.Entry<String, String> entry : aliases.entrySet()) {
+                            plugin.getMessageManager().sendMessage(player, "serveralias_list_entry",
+                                Placeholder.unparsed("server", entry.getKey()),
+                                Placeholder.unparsed("alias", entry.getValue()));
+                        }
+                    });
+                });
+            }
+            
+            default -> plugin.getMessageManager().sendMessage(player, "usage_serveralias");
+        }
+    }
+    
     private boolean hasAdminPermission(Player player) {
         return player.isOp() ||
                player.hasPermission("*") ||
@@ -1367,6 +1857,7 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
             completions.add("deny");
             completions.add("disband");
             completions.add("invite");
+            completions.add("invites");
             completions.add("join");
             completions.add("unjoin");
             completions.add("kick");
@@ -1377,8 +1868,17 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
             completions.add("sethome");
             completions.add("delhome");
             completions.add("home");
-            completions.add("settag");
+            
+            if (plugin.getConfigManager().isTeamTagEnabled()) {
+                completions.add("settag");
+            }
+            
             completions.add("setdesc");
+            
+            if (plugin.getConfig().getBoolean("features.team_rename", true)) {
+                completions.add("rename");
+            }
+            
             completions.add("transfer");
             completions.add("pvp");
             completions.add("bank");
@@ -1486,6 +1986,13 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
                 case "admin" -> {
                     if (hasAdminPermission(player)) {
                         return List.of("disband", "testmigration", "enderchest", "performance").stream()
+                                .filter(cmd -> cmd.toLowerCase().startsWith(args[1].toLowerCase()))
+                                .collect(Collectors.toList());
+                    }
+                }
+                case "serveralias" -> {
+                    if (hasAdminPermission(player)) {
+                        return List.of("set", "remove", "list").stream()
                                 .filter(cmd -> cmd.toLowerCase().startsWith(args[1].toLowerCase()))
                                 .collect(Collectors.toList());
                     }

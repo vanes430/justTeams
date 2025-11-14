@@ -47,6 +47,11 @@ public class TeamSettingsGUI implements IRefreshableGUI, InventoryHolder {
         for (String key : itemsSection.getKeys(false)) {
             ConfigurationSection itemConfig = itemsSection.getConfigurationSection(key);
             if(itemConfig == null) continue;
+            
+            if (key.equals("change-tag") && !plugin.getConfigManager().isTeamTagEnabled()) {
+                continue;
+            }
+            
             int slot = itemConfig.getInt("slot", -1);
             if (slot == -1) continue;
             Material material = Material.matchMaterial(itemConfig.getString("material", "STONE"));
@@ -74,6 +79,7 @@ public class TeamSettingsGUI implements IRefreshableGUI, InventoryHolder {
                 ? plugin.getGuiConfigManager().getString("team-settings-gui.items.toggle-public.status-public", "<green>Public")
                 : plugin.getGuiConfigManager().getString("team-settings-gui.items.toggle-public.status-private", "<red>Private");
         return text.replace("<team_tag>", team.getTag())
+                .replace("<team_name>", team.getName())
                 .replace("<team_description>", team.getDescription())
                 .replace("<public_status>", status);
     }
@@ -81,7 +87,7 @@ public class TeamSettingsGUI implements IRefreshableGUI, InventoryHolder {
         viewer.openInventory(inventory);
     }
     public void refresh() {
-        open();
+        initializeItems();
     }
     public Team getTeam() {
         return team;

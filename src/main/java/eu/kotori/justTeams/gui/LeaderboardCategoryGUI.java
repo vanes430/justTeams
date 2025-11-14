@@ -34,6 +34,7 @@ public class LeaderboardCategoryGUI implements InventoryHolder {
         setItemFromConfig(itemsConfig, "top-kills");
         setItemFromConfig(itemsConfig, "top-balance");
         setItemFromConfig(itemsConfig, "top-members");
+        setItemFromConfig(itemsConfig, "back-button");
         ConfigurationSection fillConfig = guiConfig.getConfigurationSection("fill-item");
         if (fillConfig != null) {
             ItemStack fillItem = new ItemBuilder(Material.matchMaterial(fillConfig.getString("material", "GRAY_STAINED_GLASS_PANE")))

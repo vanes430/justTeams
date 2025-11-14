@@ -40,22 +40,28 @@ public class DatabaseStorage implements IDataStorage {
         config.setMaxLifetime(maxLifetime);
         config.setConnectionTimeout(connectionTimeout);
         config.setValidationTimeout(validationTimeout);
-        config.setConnectionTestQuery("SELECT 1");
-        config.setInitializationFailTimeout(-1);
+        config.setConnectionTestQuery("/* ping */ SELECT 1");
+        config.setInitializationFailTimeout(connectionTimeout);
         config.setIsolateInternalQueries(false);
         config.setAllowPoolSuspension(false);
         config.setReadOnly(false);
         config.setRegisterMbeans(false);
+        
+        config.setKeepaliveTime(300000); 
+        config.setMaxLifetime(1800000); 
+        config.setIdleTimeout(600000);
 
         if (leakDetectionThreshold > 0) {
             config.setLeakDetectionThreshold(leakDetectionThreshold);
+        } else if (plugin.getConfig().getBoolean("storage.connection_pool.enable_leak_detection", false)) {
+            config.setLeakDetectionThreshold(60000); 
         }
 
-        boolean useMySQL = storageType.equals("mysql") && plugin.getConfig().getBoolean("storage.mysql.enabled", false);
+        boolean useMySQL = storageType.equals("mysql") || storageType.equals("mariadb");
         if (useMySQL) {
             config.addDataSourceProperty("cachePrepStmts", "true");
-            config.addDataSourceProperty("prepStmtCacheSize", "500");
-            config.addDataSourceProperty("prepStmtCacheSqlLimit", "4096");
+            config.addDataSourceProperty("prepStmtCacheSize", "250");
+            config.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
             config.addDataSourceProperty("useServerPrepStmts", "true");
             config.addDataSourceProperty("useLocalSessionState", "true");
             config.addDataSourceProperty("rewriteBatchedStatements", "true");
@@ -63,58 +69,57 @@ public class DatabaseStorage implements IDataStorage {
             config.addDataSourceProperty("cacheServerConfiguration", "true");
             config.addDataSourceProperty("elideSetAutoCommits", "true");
             config.addDataSourceProperty("maintainTimeStats", "false");
-            config.addDataSourceProperty("useCompression", "true");
-            config.addDataSourceProperty("autoReconnect", "true");
-            config.addDataSourceProperty("maxReconnects", "3");
-            config.addDataSourceProperty("initialTimeout", "2");
-            config.addDataSourceProperty("connectTimeout", "5000");
-            config.addDataSourceProperty("socketTimeout", "15000");
-            config.addDataSourceProperty("useAffectedRows", "false");
-            config.addDataSourceProperty("useSSL", "false");
-            config.addDataSourceProperty("allowPublicKeyRetrieval", "true");
-            config.addDataSourceProperty("zeroDateTimeBehavior", "convertToNull");
-            config.addDataSourceProperty("jdbcCompliantTruncation", "false");
-            config.addDataSourceProperty("tinyInt1isBit", "false");
-            config.addDataSourceProperty("transformedBitIsBoolean", "true");
-            config.addDataSourceProperty("useReadAheadInput", "false");
-            config.addDataSourceProperty("useStreamingResults", "false");
-            config.addDataSourceProperty("enableQueryTimeouts", "true");
-            config.addDataSourceProperty("queryTimeoutKillsConnection", "true");
-            config.addDataSourceProperty("maxAllowedPacket", "16777216");
-            config.addDataSourceProperty("reconnectAtTxEnd", "false");
-            config.addDataSourceProperty("retriesAllDown", "120");
-            config.addDataSourceProperty("autoReconnectForPools", "false");
-            config.addDataSourceProperty("failOverReadOnly", "true");
-            config.addDataSourceProperty("queriesBeforeRetryMaster", "50");
-            config.addDataSourceProperty("secondsBeforeRetryMaster", "30");
+            
+            config.addDataSourceProperty("characterEncoding", "UTF-8");
+            config.addDataSourceProperty("useUnicode", "true");
+            
+            config.addDataSourceProperty("tcpKeepAlive", "true");
         }
         if (useMySQL) {
-            plugin.getLogger().info("Connecting to MySQL database...");
+            plugin.getLogger().info("Connecting to MySQL/MariaDB database...");
             config.setDriverClassName("com.mysql.cj.jdbc.Driver");
             
             String host = plugin.getConfig().getString("storage.mysql.host", "localhost");
             int port = plugin.getConfig().getInt("storage.mysql.port", 3306);
             String database = plugin.getConfig().getString("storage.mysql.database", "teams");
+            String username = plugin.getConfig().getString("storage.mysql.username", "root");
+            String password = plugin.getConfig().getString("storage.mysql.password", "");
             boolean useSSL = plugin.getConfig().getBoolean("storage.mysql.use_ssl", false);
             String charset = plugin.getConfig().getString("storage.mysql.character_encoding", "utf8mb4");
             String collation = plugin.getConfig().getString("storage.mysql.collation", "utf8mb4_unicode_ci");
             
-            String jdbcUrl = String.format("jdbc:mysql://%s:%d/%s?useSSL=%s&allowPublicKeyRetrieval=true&serverTimezone=UTC&useUnicode=true&characterEncoding=%s&connectionCollation=%s&autoReconnect=true&useLocalSessionState=true&useLocalTransactionState=true&rewriteBatchedStatements=true&cachePrepStmts=true&cacheServerConfiguration=true&elideSetAutoCommits=true&useServerPrepStmts=true&zeroDateTimeBehavior=convertToNull&jdbcCompliantTruncation=false",
-                    host, port, database, useSSL, charset, collation);
+            if (host == null || host.isEmpty()) {
+                plugin.getLogger().severe("MySQL host is not configured! Please set storage.mysql.host in config.yml");
+                return false;
+            }
+            if (database == null || database.isEmpty()) {
+                plugin.getLogger().severe("MySQL database is not configured! Please set storage.mysql.database in config.yml");
+                return false;
+            }
+            
+            String jdbcUrl = String.format("jdbc:mysql://%s:%d/%s?useSSL=%s&allowPublicKeyRetrieval=true&serverTimezone=UTC",
+                    host, port, database, useSSL);
             
             config.setJdbcUrl(jdbcUrl);
-            config.setUsername(plugin.getConfig().getString("storage.mysql.username", "root"));
-            config.setPassword(plugin.getConfig().getString("storage.mysql.password", ""));
+            config.setUsername(username);
+            config.setPassword(password);
+            
             
             int mysqlConnectionTimeout = plugin.getConfig().getInt("storage.mysql.connection_timeout", 30000);
             
             config.setConnectionTimeout(mysqlConnectionTimeout);
-            config.setValidationTimeout(Math.min(validationTimeout, mysqlConnectionTimeout / 2));
+            config.setValidationTimeout(5000);
+            config.setInitializationFailTimeout(mysqlConnectionTimeout);
             
             config.setMaximumPoolSize(Math.max(maxPoolSize, 10));
-            config.setMinimumIdle(Math.max(minIdle, 3));
+            config.setMinimumIdle(0);
             
-            plugin.getLogger().info("MySQL connection configured: " + host + ":" + port + "/" + database);
+            plugin.getLogger().info("MySQL connection configured:");
+            plugin.getLogger().info("  Host: " + host + ":" + port);
+            plugin.getLogger().info("  Database: " + database);
+            plugin.getLogger().info("  Username: " + username);
+            plugin.getLogger().info("  SSL: " + useSSL);
+            plugin.getLogger().info("  Connection timeout: " + mysqlConnectionTimeout + "ms");
         } else {
             plugin.getLogger().info("MySQL not enabled or configured. Falling back to H2 file-based storage.");
             File dataFolder = new File(plugin.getDataFolder(), "data");
@@ -139,13 +144,60 @@ public class DatabaseStorage implements IDataStorage {
             
             config.getDataSourceProperties().clear();
         }
+        if (useMySQL) {
+            try {
+                plugin.getLogger().info("Pre-testing direct JDBC connection...");
+                String host = plugin.getConfig().getString("storage.mysql.host", "localhost");
+                int port = plugin.getConfig().getInt("storage.mysql.port", 3306);
+                String database = plugin.getConfig().getString("storage.mysql.database", "teams");
+                String username = plugin.getConfig().getString("storage.mysql.username", "root");
+                String password = plugin.getConfig().getString("storage.mysql.password", "");
+                boolean useSSL = plugin.getConfig().getBoolean("storage.mysql.use_ssl", false);
+                
+                String testUrl = String.format("jdbc:mysql://%s:%d/%s?useSSL=%s&allowPublicKeyRetrieval=true&connectTimeout=10000&socketTimeout=10000",
+                        host, port, database, useSSL);
+                
+                Class.forName("com.mysql.cj.jdbc.Driver");
+                try (Connection testConn = DriverManager.getConnection(testUrl, username, password)) {
+                    plugin.getLogger().info("✓ Direct JDBC connection successful!");
+                    try (Statement stmt = testConn.createStatement(); ResultSet rs = stmt.executeQuery("SELECT 1")) {
+                        if (rs.next()) {
+                            plugin.getLogger().info("✓ Database query test successful!");
+                        }
+                    }
+                }
+            } catch (ClassNotFoundException e) {
+                plugin.getLogger().severe("✗ MySQL JDBC Driver not found! This is a critical error.");
+                plugin.getLogger().severe("The MySQL driver should be shaded into the plugin JAR.");
+                return false;
+            } catch (SQLException e) {
+                plugin.getLogger().severe("✗ Direct JDBC connection failed!");
+                plugin.getLogger().severe("Error: " + e.getMessage());
+                plugin.getLogger().severe("SQLState: " + e.getSQLState());
+                plugin.getLogger().severe("This means MySQL is not accessible. Fix this before continuing.");
+                return false;
+            } catch (Exception e) {
+                plugin.getLogger().warning("Pre-test connection check failed: " + e.getMessage());
+                plugin.getLogger().warning("Continuing with HikariCP initialization...");
+            }
+        }
+        
         try {
             plugin.getLogger().info("Attempting to initialize HikariCP connection pool...");
+            long startTime = System.currentTimeMillis();
+            
             this.hikari = new HikariDataSource(config);
             plugin.getLogger().info("HikariCP pool created successfully");
             
+            plugin.getLogger().info("Testing database connection (this may take up to " + config.getConnectionTimeout()/1000 + " seconds)...");
+            
             try (Connection testConn = this.hikari.getConnection()) {
-                plugin.getLogger().info("Database connection test successful!");
+                long connectionTime = System.currentTimeMillis() - startTime;
+                plugin.getLogger().info("Database connection test successful! (took " + connectionTime + "ms)");
+                
+                DatabaseMetaData metaData = testConn.getMetaData();
+                plugin.getLogger().info("Connected to: " + metaData.getDatabaseProductName() + " " + metaData.getDatabaseProductVersion());
+                plugin.getLogger().info("JDBC URL: " + metaData.getURL());
                 
                 runMigrationsAndSchemaChecks();
                 
@@ -153,9 +205,28 @@ public class DatabaseStorage implements IDataStorage {
                 return true;
             }
         } catch (Exception e) {
-            plugin.getLogger().severe("Failed to initialize database connection pool for " + storageType + "!");
-            plugin.getLogger().severe("Error: " + e.getMessage());
-            plugin.getLogger().severe("Attempting fallback H2 configuration...");
+            plugin.getLogger().severe("============================================");
+            plugin.getLogger().severe("DATABASE CONNECTION FAILED!");
+            plugin.getLogger().severe("============================================");
+            plugin.getLogger().severe("Storage type: " + storageType);
+            plugin.getLogger().severe("Error type: " + e.getClass().getSimpleName());
+            plugin.getLogger().severe("Error message: " + e.getMessage());
+            
+            if (useMySQL) {
+                plugin.getLogger().severe("");
+                plugin.getLogger().severe("Troubleshooting steps:");
+                plugin.getLogger().severe("1. Verify MySQL server is running at " + plugin.getConfig().getString("storage.mysql.host") + ":" + plugin.getConfig().getInt("storage.mysql.port"));
+                plugin.getLogger().severe("2. Verify database '" + plugin.getConfig().getString("storage.mysql.database") + "' exists");
+                plugin.getLogger().severe("3. Verify username and password are correct");
+                plugin.getLogger().severe("4. Check firewall allows connection to MySQL port");
+                plugin.getLogger().severe("5. Verify MySQL user has proper permissions (GRANT ALL on database)");
+                plugin.getLogger().severe("");
+                plugin.getLogger().severe("To use H2 (local file storage) instead, change:");
+                plugin.getLogger().severe("  storage.type: \"h2\"");
+                plugin.getLogger().severe("in config.yml");
+            }
+            
+            plugin.getLogger().severe("============================================");
             
             if (this.hikari != null && !this.hikari.isClosed()) {
                 try {
@@ -163,6 +234,12 @@ public class DatabaseStorage implements IDataStorage {
                 } catch (Exception cleanup) {
                     plugin.getLogger().warning("Error during cleanup: " + cleanup.getMessage());
                 }
+            }
+            
+            if (useMySQL) {
+                plugin.getLogger().severe("MySQL connection failed. Plugin will NOT start.");
+                plugin.getLogger().severe("Fix the database configuration or switch to H2 storage.");
+                return false;
             }
             
             if (!storageType.equals("mysql")) {
@@ -208,9 +285,64 @@ public class DatabaseStorage implements IDataStorage {
                     if (e.getMessage().contains("Duplicate column name") || 
                         e.getMessage().contains("already exists") ||
                         e.getMessage().contains("duplicate")) {
-                        plugin.getLogger().info("is_public column already exists in donut_teams table");
+                        if (plugin.getConfigManager().isDebugEnabled()) {
+                            plugin.getLogger().info("is_public column already exists in donut_teams table");
+                        }
                     } else {
                         plugin.getLogger().warning("Could not add is_public column: " + e.getMessage());
+                    }
+                }
+
+                try {
+                    if ("mysql".equals(storageType)) {
+                        stmt.execute("ALTER TABLE `donut_cross_server_updates` ADD COLUMN `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+                    } else {
+                        stmt.execute("ALTER TABLE `donut_cross_server_updates` ADD COLUMN `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+                    }
+                    plugin.getLogger().info("Added created_at column to donut_cross_server_updates table");
+                } catch (SQLException e) {
+                    if (e.getMessage().contains("Duplicate column name") || 
+                        e.getMessage().contains("already exists") ||
+                        e.getMessage().contains("duplicate")) {
+                        if (plugin.getConfigManager().isDebugEnabled()) {
+                            plugin.getLogger().info("created_at column already exists in donut_cross_server_updates table");
+                        }
+                    } else {
+                        plugin.getLogger().warning("Could not add created_at column to donut_cross_server_updates: " + e.getMessage());
+                    }
+                }
+
+                try {
+                    if ("mysql".equals(storageType)) {
+                        stmt.execute("ALTER TABLE `donut_cross_server_messages` ADD COLUMN `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+                    } else {
+                        stmt.execute("ALTER TABLE `donut_cross_server_messages` ADD COLUMN `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+                    }
+                    plugin.getLogger().info("Added created_at column to donut_cross_server_messages table");
+                } catch (SQLException e) {
+                    if (e.getMessage().contains("Duplicate column name") || 
+                        e.getMessage().contains("already exists") ||
+                        e.getMessage().contains("duplicate")) {
+                        if (plugin.getConfigManager().isDebugEnabled()) {
+                            plugin.getLogger().info("created_at column already exists in donut_cross_server_messages table");
+                        }
+                    } else {
+                        plugin.getLogger().warning("Could not add created_at column to donut_cross_server_messages: " + e.getMessage());
+                    }
+                }
+
+                try {
+                    stmt.execute("ALTER TABLE `donut_teams` ADD COLUMN `alias` VARCHAR(32) DEFAULT NULL");
+                    plugin.getLogger().info("Added alias column to donut_teams table");
+                } catch (SQLException e) {
+                    if (e.getMessage().contains("Duplicate column name") || 
+                        e.getMessage().contains("already exists") ||
+                        e.getMessage().contains("duplicate")) {
+                        if (plugin.getConfigManager().isDebugEnabled()) {
+                            plugin.getLogger().info("alias column already exists in donut_teams table");
+                        }
+                    } else {
+                        plugin.getLogger().warning("Could not add alias column to donut_teams: " + e.getMessage());
                     }
                 }
 
@@ -232,9 +364,19 @@ public class DatabaseStorage implements IDataStorage {
         }
     }
     
-    /**
-     * Creates a unique index with H2/MySQL compatibility
-     */
+    private void createIndex(Statement stmt, String indexName, String tableName, String columns) {
+        try {
+            if ("mysql".equals(storageType)) {
+                stmt.execute("ALTER TABLE " + tableName + " ADD INDEX " + indexName + " (" + columns + ")");
+            } else {
+                stmt.execute("CREATE INDEX IF NOT EXISTS " + indexName + " ON " + tableName + " (" + columns + ")");
+            }
+            plugin.getLogger().info("✓ Index " + indexName + " created successfully");
+        } catch (SQLException e) {
+            plugin.getLogger().info("Note: Could not create index " + indexName + " (may already exist): " + e.getMessage());
+        }
+    }
+
     private void createUniqueIndex(Statement stmt, String indexName, String tableName, String columns) {
         try {
             if ("mysql".equals(storageType)) {
@@ -361,6 +503,23 @@ public class DatabaseStorage implements IDataStorage {
             "`lock_time` TIMESTAMP NOT NULL, " +
             "FOREIGN KEY (`team_id`) REFERENCES `donut_teams`(`id`) ON DELETE CASCADE)");
 
+        createTable(stmt, "donut_player_cache", 
+            "CREATE TABLE IF NOT EXISTS `donut_player_cache` (" +
+            "`player_uuid` VARCHAR(36) PRIMARY KEY, " +
+            "`player_name` VARCHAR(16) NOT NULL, " +
+            "`last_seen` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, " +
+            "INDEX `idx_player_name` (`player_name`))");
+
+        createTable(stmt, "donut_team_invites", 
+            "CREATE TABLE IF NOT EXISTS `donut_team_invites` (" +
+            "`id` INT AUTO_INCREMENT PRIMARY KEY, " +
+            "`team_id` INT NOT NULL, " +
+            "`player_uuid` VARCHAR(36) NOT NULL, " +
+            "`inviter_uuid` VARCHAR(36) NOT NULL, " +
+            "`created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
+            "UNIQUE KEY `team_player_invite` (`team_id`, `player_uuid`), " +
+            "FOREIGN KEY (`team_id`) REFERENCES `donut_teams`(`id`) ON DELETE CASCADE)");
+
         createTable(stmt, "donut_team_blacklist", 
             "CREATE TABLE IF NOT EXISTS `donut_team_blacklist` (" +
             "`id` INT AUTO_INCREMENT PRIMARY KEY, " +
@@ -372,6 +531,28 @@ public class DatabaseStorage implements IDataStorage {
             "`blacklisted_by_name` VARCHAR(16) NOT NULL, " +
             "`blacklisted_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
             "UNIQUE KEY `team_player_blacklist` (`team_id`, `player_uuid`), " +
+            "FOREIGN KEY (`team_id`) REFERENCES `donut_teams`(`id`) ON DELETE CASCADE)");
+
+        createTable(stmt, "donut_player_sessions", 
+            "CREATE TABLE IF NOT EXISTS `donut_player_sessions` (" +
+            "`player_uuid` VARCHAR(36) PRIMARY KEY, " +
+            "`server_name` VARCHAR(255) NOT NULL, " +
+            "`last_seen` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, " +
+            "INDEX `idx_server_name` (`server_name`), " +
+            "INDEX `idx_last_seen` (`last_seen`))");
+
+        createTable(stmt, "donut_server_aliases",
+            "CREATE TABLE IF NOT EXISTS `donut_server_aliases` (" +
+            "`server_name` VARCHAR(255) PRIMARY KEY, " +
+            "`alias` VARCHAR(64) NOT NULL, " +
+            "`created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
+            "`updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)");
+
+        createTable(stmt, "donut_team_rename_cooldowns",
+            "CREATE TABLE IF NOT EXISTS `donut_team_rename_cooldowns` (" +
+            "`team_id` INT PRIMARY KEY, " +
+            "`last_rename` TIMESTAMP NOT NULL, " +
+            "`created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
             "FOREIGN KEY (`team_id`) REFERENCES `donut_teams`(`id`) ON DELETE CASCADE)");
     }
 
@@ -490,6 +671,25 @@ public class DatabaseStorage implements IDataStorage {
             "`lock_time` TIMESTAMP NOT NULL, " +
             "FOREIGN KEY (`team_id`) REFERENCES `donut_teams`(`id`) ON DELETE CASCADE)");
 
+        createTable(stmt, "donut_player_cache", 
+            "CREATE TABLE IF NOT EXISTS `donut_player_cache` (" +
+            "`player_uuid` VARCHAR(36) PRIMARY KEY, " +
+            "`player_name` VARCHAR(16) NOT NULL, " +
+            "`last_seen` TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
+        
+        createIndex(stmt, "idx_player_name", "`donut_player_cache`", "`player_name`");
+
+        createTable(stmt, "donut_team_invites", 
+            "CREATE TABLE IF NOT EXISTS `donut_team_invites` (" +
+            "`id` INT AUTO_INCREMENT PRIMARY KEY, " +
+            "`team_id` INT NOT NULL, " +
+            "`player_uuid` VARCHAR(36) NOT NULL, " +
+            "`inviter_uuid` VARCHAR(36) NOT NULL, " +
+            "`created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
+            "FOREIGN KEY (`team_id`) REFERENCES `donut_teams`(`id`) ON DELETE CASCADE)");
+        
+        createUniqueIndex(stmt, "idx_team_player_invite", "`donut_team_invites`", "`team_id`, `player_uuid`");
+
         createTable(stmt, "donut_team_blacklist", 
             "CREATE TABLE IF NOT EXISTS `donut_team_blacklist` (" +
             "`id` INT AUTO_INCREMENT PRIMARY KEY, " +
@@ -501,13 +701,32 @@ public class DatabaseStorage implements IDataStorage {
             "`blacklisted_by_name` VARCHAR(16) NOT NULL, " +
             "`blacklisted_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
             "FOREIGN KEY (`team_id`) REFERENCES `donut_teams`(`id`) ON DELETE CASCADE)");
-        
+
         createUniqueIndex(stmt, "idx_team_player_blacklist", "`donut_team_blacklist`", "`team_id`, `player_uuid`");
-    }
-    
-    /**
-     * Fallback method to try the most minimal H2 configuration possible
-     */
+
+        createTable(stmt, "donut_player_sessions", 
+            "CREATE TABLE IF NOT EXISTS `donut_player_sessions` (" +
+            "`player_uuid` VARCHAR(36) PRIMARY KEY, " +
+            "`server_name` VARCHAR(255) NOT NULL, " +
+            "`last_seen` TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
+
+        createIndex(stmt, "idx_session_server", "`donut_player_sessions`", "`server_name`");
+        createIndex(stmt, "idx_session_last_seen", "`donut_player_sessions`", "`last_seen`");
+
+        createTable(stmt, "donut_server_aliases",
+            "CREATE TABLE IF NOT EXISTS `donut_server_aliases` (" +
+            "`server_name` VARCHAR(255) PRIMARY KEY, " +
+            "`alias` VARCHAR(64) NOT NULL, " +
+            "`created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
+            "`updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
+
+        createTable(stmt, "donut_team_rename_cooldowns",
+            "CREATE TABLE IF NOT EXISTS `donut_team_rename_cooldowns` (" +
+            "`team_id` INT PRIMARY KEY, " +
+            "`last_rename` TIMESTAMP NOT NULL, " +
+            "`created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
+            "FOREIGN KEY (`team_id`) REFERENCES `donut_teams`(`id`) ON DELETE CASCADE)");
+    }  
     private boolean tryMinimalH2Configuration() {
         plugin.getLogger().info("Attempting minimal H2 configuration...");
         
@@ -614,9 +833,6 @@ public class DatabaseStorage implements IDataStorage {
         }
     }
     
-    /**
-     * Attempts to recover the database connection if it's lost
-     */
     public boolean attemptConnectionRecovery() {
         if (isConnected()) {
             return true;
@@ -690,16 +906,74 @@ public class DatabaseStorage implements IDataStorage {
         }
     }
     @Override
-    public void addMemberToTeam(int teamId, UUID playerUuid) {
-        String sql = "INSERT INTO donut_team_members (player_uuid, team_id, role, join_date) VALUES (?, ?, ?, ?)";
-        try (Connection conn = getConnection(); PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, playerUuid.toString());
-            stmt.setInt(2, teamId);
-            stmt.setString(3, TeamRole.MEMBER.name());
-            stmt.setTimestamp(4, Timestamp.from(Instant.now()));
-            stmt.executeUpdate();
+    public boolean addMemberToTeam(int teamId, UUID playerUuid) {
+        String checkSql = "SELECT team_id FROM donut_team_members WHERE player_uuid = ? FOR UPDATE";
+        String insertSql = "INSERT INTO donut_team_members (player_uuid, team_id, role, join_date, can_withdraw, can_use_enderchest, can_set_home, can_use_home) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+        
+        try (Connection conn = getConnection()) {
+            conn.setAutoCommit(false);
+            
+            try {
+                try (PreparedStatement checkStmt = conn.prepareStatement(checkSql)) {
+                    checkStmt.setString(1, playerUuid.toString());
+                    ResultSet rs = checkStmt.executeQuery();
+                    if (rs.next()) {
+                        conn.rollback();
+                        if (plugin.getConfigManager().isDebugEnabled()) {
+                            plugin.getDebugLogger().log("Player " + playerUuid + " is already in a team, cannot add to team " + teamId);
+                        }
+                        return false;
+                    }
+                }
+                
+                try (PreparedStatement stmt = conn.prepareStatement(insertSql)) {
+                    stmt.setString(1, playerUuid.toString());
+                    stmt.setInt(2, teamId);
+                    stmt.setString(3, TeamRole.MEMBER.name());
+                    stmt.setTimestamp(4, Timestamp.from(Instant.now()));
+                    stmt.setBoolean(5, false);  
+                    stmt.setBoolean(6, true);   
+                    stmt.setBoolean(7, false);  
+                    stmt.setBoolean(8, true);  
+                    int rowsAffected = stmt.executeUpdate();
+                    
+                    if (rowsAffected > 0) {
+                        conn.commit();
+                        return true;
+                    } else {
+                        conn.rollback();
+                        return false;
+                    }
+                }
+            } catch (SQLException e) {
+                try {
+                    conn.rollback();
+                } catch (SQLException rollbackEx) {
+                    plugin.getLogger().severe("Error rolling back transaction: " + rollbackEx.getMessage());
+                }
+                
+                if (e.getMessage().contains("Duplicate entry") || e.getMessage().contains("unique constraint") 
+                        || e.getMessage().contains("UNIQUE")) {
+                    if (plugin.getConfigManager().isDebugEnabled()) {
+                        plugin.getDebugLogger().log("Duplicate key detected when adding member " + playerUuid + " to team " + teamId + " - race condition prevented");
+                    }
+                    return false;
+                }
+                
+                plugin.getLogger().severe("Could not add member " + playerUuid + " to team " + teamId + ": " + e.getMessage());
+                if (plugin.getConfigManager().isDebugEnabled()) {
+                    e.printStackTrace();
+                }
+                throw e;
+            } finally {
+                try {
+                    conn.setAutoCommit(true);
+                } catch (SQLException e) {
+                    plugin.getLogger().warning("Error restoring auto-commit: " + e.getMessage());
+                }
+            }
         } catch (SQLException e) {
-            plugin.getLogger().severe("Could not add member " + playerUuid + " to team " + teamId + ": " + e.getMessage());
+            return false;
         }
     }
     @Override
@@ -906,25 +1180,49 @@ public class DatabaseStorage implements IDataStorage {
         } else {
             sql = "MERGE INTO donut_team_enderchest (team_id, inventory_data) KEY(team_id) VALUES (?, ?)";
         }
+        
+        if (plugin.getConfig().getBoolean("debug", false)) {
+            plugin.getLogger().info("[DEBUG] Saving enderchest to " + storageType.toUpperCase() + " - Team ID: " + teamId + ", Data length: " + (serializedInventory != null ? serializedInventory.length() : "null"));
+        }
+        
         try (Connection conn = getConnection(); PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setInt(1, teamId);
             stmt.setString(2, serializedInventory);
-            stmt.executeUpdate();
+            int rowsAffected = stmt.executeUpdate();
+            
+            if (plugin.getConfig().getBoolean("debug", false)) {
+                plugin.getLogger().info("[DEBUG] Database save successful - Rows affected: " + rowsAffected);
+            }
         } catch (SQLException e) {
             plugin.getLogger().severe("Could not save ender chest for team " + teamId + ": " + e.getMessage());
+            e.printStackTrace();
         }
     }
     @Override
     public String getEnderChest(int teamId) {
         String sql = "SELECT inventory_data FROM donut_team_enderchest WHERE team_id = ?";
+        
+        if (plugin.getConfig().getBoolean("debug", false)) {
+            plugin.getLogger().info("[DEBUG] Loading enderchest from " + storageType.toUpperCase() + " - Team ID: " + teamId);
+        }
+        
         try (Connection conn = getConnection(); PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setInt(1, teamId);
             ResultSet rs = stmt.executeQuery();
             if (rs.next()) {
-                return rs.getString("inventory_data");
+                String data = rs.getString("inventory_data");
+                if (plugin.getConfig().getBoolean("debug", false)) {
+                    plugin.getLogger().info("[DEBUG] Database load successful - Data length: " + (data != null ? data.length() : "null"));
+                }
+                return data;
+            } else {
+                if (plugin.getConfig().getBoolean("debug", false)) {
+                    plugin.getLogger().info("[DEBUG] No enderchest data found in database for team " + teamId);
+                }
             }
         } catch (SQLException e) {
             plugin.getLogger().severe("Could not load ender chest for team " + teamId + ": " + e.getMessage());
+            e.printStackTrace();
         }
         return null;
     }
@@ -943,6 +1241,29 @@ public class DatabaseStorage implements IDataStorage {
             plugin.getLogger().severe("Could not update permissions for member " + memberUuid + ": " + e.getMessage());
         }
     }
+    
+    @Override
+    public void updateMemberPermission(int teamId, UUID memberUuid, String permission, boolean value) throws SQLException {
+        String columnName = switch (permission.toLowerCase()) {
+            case "withdraw" -> "can_withdraw";
+            case "enderchest" -> "can_use_enderchest";
+            case "sethome" -> "can_set_home";
+            case "usehome" -> "can_use_home";
+            default -> throw new IllegalArgumentException("Invalid permission: " + permission);
+        };
+        
+        String sql = "UPDATE donut_team_members SET " + columnName + " = ? WHERE player_uuid = ? AND team_id = ?";
+        try (Connection conn = getConnection(); PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setBoolean(1, value);
+            stmt.setString(2, memberUuid.toString());
+            stmt.setInt(3, teamId);
+            stmt.executeUpdate();
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Could not update " + permission + " permission for member " + memberUuid + ": " + e.getMessage());
+            throw e;
+        }
+    }
+    
     @Override
     public void updateMemberRole(int teamId, UUID memberUuid, TeamRole role) {
         String sql;
@@ -1128,6 +1449,14 @@ public class DatabaseStorage implements IDataStorage {
         team.setBalance(balance);
         team.setKills(kills);
         team.setDeaths(deaths);
+        try {
+            List<TeamPlayer> members = getTeamMembers(id);
+            for (TeamPlayer member : members) {
+                team.addMember(member);
+            }
+        } catch (Exception e) {
+            plugin.getLogger().warning("Failed to load members for team " + id + ": " + e.getMessage());
+        }
         return team;
     }
     private TeamPlayer mapPlayerFromResultSet(ResultSet rs) throws SQLException {
@@ -1213,11 +1542,15 @@ public class DatabaseStorage implements IDataStorage {
                             conn.createStatement().execute("DELETE FROM donut_cross_server_messages WHERE created_at < DATEADD(DAY, -7, NOW())");
                         }
                     } else {
-                        plugin.getLogger().info("created_at column not found in cross-server tables. Skipping cleanup until migration is complete.");
+                        if (plugin.getConfigManager().isDebugEnabled()) {
+                            plugin.getLogger().info("created_at column not found in cross-server tables. Skipping cleanup until migration is complete.");
+                        }
                     }
                 }
             } catch (SQLException e) {
-                plugin.getLogger().warning("Failed to cleanup old cross-server data: " + e.getMessage());
+                if (plugin.getConfigManager().isDebugEnabled()) {
+                    plugin.getLogger().warning("Failed to cleanup old cross-server data: " + e.getMessage());
+                }
             }
         }
     }
@@ -1373,7 +1706,9 @@ public class DatabaseStorage implements IDataStorage {
                     stmt.executeUpdate();
                 }
             } catch (SQLException e) {
-                plugin.getLogger().warning("Failed to remove cross server message: " + e.getMessage());
+                if (plugin.getConfigManager().isDebugEnabled()) {
+                    plugin.getLogger().warning("Failed to remove cross server message: " + e.getMessage());
+                }
             }
         }
     }
@@ -1383,23 +1718,34 @@ public class DatabaseStorage implements IDataStorage {
         List<CrossServerMessage> messages = new ArrayList<>();
         if (isConnected()) {
             try (Connection conn = getConnection()) {
-                String sql = "SELECT id, team_id, player_uuid, message, server_name, created_at FROM donut_cross_server_messages WHERE server_name = ?";
+                boolean hasCreatedAt = columnExists(conn, "donut_cross_server_messages", "created_at");
+                
+                String sql;
+                if (hasCreatedAt) {
+                    sql = "SELECT id, team_id, player_uuid, message, server_name, created_at FROM donut_cross_server_messages WHERE server_name != ? ORDER BY created_at ASC LIMIT 100";
+                } else {
+                    sql = "SELECT id, team_id, player_uuid, message, server_name FROM donut_cross_server_messages WHERE server_name != ? LIMIT 100";
+                }
+                
                 try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-                    stmt.setString(1, serverName);
+                    stmt.setString(1, serverName);  
                     ResultSet rs = stmt.executeQuery();
                     while (rs.next()) {
+                        Timestamp timestamp = hasCreatedAt ? rs.getTimestamp("created_at") : new Timestamp(System.currentTimeMillis());
                         messages.add(new CrossServerMessage(
                             rs.getInt("id"),
                             rs.getInt("team_id"),
                             rs.getString("player_uuid"),
                             rs.getString("message"),
                             rs.getString("server_name"),
-                            rs.getTimestamp("created_at")
+                            timestamp
                         ));
                     }
                 }
             } catch (SQLException e) {
-                plugin.getLogger().warning("Failed to get cross server messages: " + e.getMessage());
+                if (plugin.getConfigManager().isDebugEnabled()) {
+                    plugin.getLogger().warning("Failed to get cross server messages: " + e.getMessage());
+                }
             }
         }
         return messages;
@@ -1418,7 +1764,9 @@ public class DatabaseStorage implements IDataStorage {
                     stmt.executeUpdate();
                 }
             } catch (SQLException e) {
-                plugin.getLogger().warning("Failed to add cross server message: " + e.getMessage());
+                if (plugin.getConfigManager().isDebugEnabled()) {
+                    plugin.getLogger().warning("Failed to add cross server message: " + e.getMessage());
+                }
             }
         }
     }
@@ -1433,7 +1781,9 @@ public class DatabaseStorage implements IDataStorage {
                     stmt.executeUpdate();
                 }
             } catch (SQLException e) {
-                plugin.getLogger().warning("Failed to remove cross server update: " + e.getMessage());
+                if (plugin.getConfigManager().isDebugEnabled()) {
+                    plugin.getLogger().warning("Failed to remove cross server update: " + e.getMessage());
+                }
             }
         }
     }
@@ -1443,23 +1793,34 @@ public class DatabaseStorage implements IDataStorage {
         List<CrossServerUpdate> updates = new ArrayList<>();
         if (isConnected()) {
             try (Connection conn = getConnection()) {
-                String sql = "SELECT id, team_id, update_type, player_uuid, server_name, created_at FROM donut_cross_server_updates WHERE server_name = ?";
+                boolean hasCreatedAt = columnExists(conn, "donut_cross_server_updates", "created_at");
+                
+                String sql;
+                if (hasCreatedAt) {
+                    sql = "SELECT id, team_id, update_type, player_uuid, server_name, created_at FROM donut_cross_server_updates WHERE server_name = ? OR server_name = 'ALL_SERVERS' ORDER BY created_at ASC LIMIT 100";
+                } else {
+                    sql = "SELECT id, team_id, update_type, player_uuid, server_name FROM donut_cross_server_updates WHERE server_name = ? OR server_name = 'ALL_SERVERS' LIMIT 100";
+                }
+                
                 try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-                    stmt.setString(1, serverName);
+                    stmt.setString(1, serverName); 
                     ResultSet rs = stmt.executeQuery();
                     while (rs.next()) {
+                        Timestamp timestamp = hasCreatedAt ? rs.getTimestamp("created_at") : new Timestamp(System.currentTimeMillis());
                         updates.add(new CrossServerUpdate(
                             rs.getInt("id"),
                             rs.getInt("team_id"),
                             rs.getString("update_type"),
                             rs.getString("player_uuid"),
                             rs.getString("server_name"),
-                            rs.getTimestamp("created_at")
+                            timestamp
                         ));
                     }
                 }
             } catch (SQLException e) {
-                plugin.getLogger().warning("Failed to get cross server updates: " + e.getMessage());
+                if (plugin.getConfigManager().isDebugEnabled()) {
+                    plugin.getLogger().warning("Failed to get cross server updates: " + e.getMessage());
+                }
             }
         }
         return updates;
@@ -1481,7 +1842,9 @@ public class DatabaseStorage implements IDataStorage {
                     stmt.executeBatch();
                 }
             } catch (SQLException e) {
-                plugin.getLogger().warning("Failed to add cross server updates batch: " + e.getMessage());
+                if (plugin.getConfigManager().isDebugEnabled()) {
+                    plugin.getLogger().warning("Failed to add cross server updates batch: " + e.getMessage());
+                }
             }
         }
     }
@@ -1499,7 +1862,9 @@ public class DatabaseStorage implements IDataStorage {
                     stmt.executeUpdate();
                 }
             } catch (SQLException e) {
-                plugin.getLogger().warning("Failed to add cross server update: " + e.getMessage());
+                if (plugin.getConfigManager().isDebugEnabled()) {
+                    plugin.getLogger().warning("Failed to add cross server update: " + e.getMessage());
+                }
             }
         }
     }
@@ -1825,7 +2190,7 @@ public class DatabaseStorage implements IDataStorage {
 
         try (Connection conn = getConnection()) {
             if ("mysql".equals(storageType)) {
-                conn.createStatement().execute("OPTIMIZE TABLE donut_teams, donut_team_members, donut_team_invites, donut_team_blacklist, donut_team_settings, donut_team_warps, donut_team_enderchest_locks, donut_servers, donut_cross_server_updates, donut_cross_server_messages");
+                conn.createStatement().execute("OPTIMIZE TABLE donut_teams, donut_team_members, donut_team_invites, donut_team_blacklist, donut_team_settings, donut_team_warps, donut_team_enderchest_locks, donut_servers, donut_cross_server_updates, donut_cross_server_messages, donut_player_cache");
                 plugin.getLogger().info("MySQL database optimization completed");
             } else {
                 conn.createStatement().execute("ANALYZE");
@@ -1833,6 +2198,468 @@ public class DatabaseStorage implements IDataStorage {
             }
         } catch (SQLException e) {
             plugin.getLogger().warning("Failed to optimize database: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public Optional<UUID> getPlayerUuidByName(String playerName) {
+        if (!isConnected() || playerName == null || playerName.isEmpty()) {
+            return Optional.empty();
+        }
+        
+        try (Connection conn = getConnection()) {
+            String sql = "SELECT player_uuid FROM donut_player_cache WHERE LOWER(player_name) = LOWER(?) ORDER BY last_seen DESC LIMIT 1";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, playerName);
+                ResultSet rs = stmt.executeQuery();
+                if (rs.next()) {
+                    return Optional.of(UUID.fromString(rs.getString("player_uuid")));
+                }
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Failed to get player UUID by name: " + e.getMessage());
+        }
+        return Optional.empty();
+    }
+
+    @Override
+    public void cachePlayerName(UUID playerUuid, String playerName) {
+        if (!isConnected() || playerUuid == null || playerName == null || playerName.isEmpty()) {
+            return;
+        }
+        
+        try (Connection conn = getConnection()) {
+            String sql;
+            if ("mysql".equals(storageType)) {
+                sql = "INSERT INTO donut_player_cache (player_uuid, player_name, last_seen) VALUES (?, ?, NOW()) " +
+                      "ON DUPLICATE KEY UPDATE player_name = VALUES(player_name), last_seen = NOW()";
+            } else {
+                sql = "MERGE INTO donut_player_cache (player_uuid, player_name, last_seen) " +
+                      "KEY(player_uuid) VALUES (?, ?, NOW())";
+            }
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, playerUuid.toString());
+                stmt.setString(2, playerName);
+                stmt.executeUpdate();
+            }
+        } catch (SQLException e) {
+            if (plugin.getConfigManager().isDebugEnabled()) {
+                plugin.getLogger().warning("Failed to cache player name: " + e.getMessage());
+            }
+        }
+    }
+
+    @Override
+    public Optional<String> getPlayerNameByUuid(UUID playerUuid) {
+        if (!isConnected() || playerUuid == null) {
+            return Optional.empty();
+        }
+        
+        try (Connection conn = getConnection()) {
+            String sql = "SELECT player_name FROM donut_player_cache WHERE player_uuid = ?";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, playerUuid.toString());
+                ResultSet rs = stmt.executeQuery();
+                if (rs.next()) {
+                    return Optional.of(rs.getString("player_name"));
+                }
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Failed to get player name by UUID: " + e.getMessage());
+        }
+        return Optional.empty();
+    }
+
+    @Override
+    public void addTeamInvite(int teamId, UUID playerUuid, UUID inviterUuid) {
+        if (!isConnected() || playerUuid == null || inviterUuid == null) {
+            return;
+        }
+        
+        try (Connection conn = getConnection()) {
+            String sql;
+            if ("mysql".equals(storageType)) {
+                sql = "INSERT INTO donut_team_invites (team_id, player_uuid, inviter_uuid) VALUES (?, ?, ?) " +
+                      "ON DUPLICATE KEY UPDATE inviter_uuid = VALUES(inviter_uuid), created_at = CURRENT_TIMESTAMP";
+            } else {
+                sql = "MERGE INTO donut_team_invites (team_id, player_uuid, inviter_uuid) " +
+                      "KEY(team_id, player_uuid) VALUES (?, ?, ?)";
+            }
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setInt(1, teamId);
+                stmt.setString(2, playerUuid.toString());
+                stmt.setString(3, inviterUuid.toString());
+                stmt.executeUpdate();
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Failed to add team invite: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public void removeTeamInvite(int teamId, UUID playerUuid) {
+        if (!isConnected() || playerUuid == null) {
+            return;
+        }
+        
+        try (Connection conn = getConnection()) {
+            String sql = "DELETE FROM donut_team_invites WHERE team_id = ? AND player_uuid = ?";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setInt(1, teamId);
+                stmt.setString(2, playerUuid.toString());
+                stmt.executeUpdate();
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Failed to remove team invite: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public boolean hasTeamInvite(int teamId, UUID playerUuid) {
+        if (!isConnected() || playerUuid == null) {
+            return false;
+        }
+        
+        try (Connection conn = getConnection()) {
+            String sql = "SELECT 1 FROM donut_team_invites WHERE team_id = ? AND player_uuid = ?";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setInt(1, teamId);
+                stmt.setString(2, playerUuid.toString());
+                ResultSet rs = stmt.executeQuery();
+                return rs.next();
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Failed to check team invite: " + e.getMessage());
+        }
+        return false;
+    }
+
+    @Override
+    public List<Integer> getPlayerInvites(UUID playerUuid) {
+        List<Integer> teamIds = new ArrayList<>();
+        if (!isConnected() || playerUuid == null) {
+            return teamIds;
+        }
+        
+        try (Connection conn = getConnection()) {
+            String sql = "SELECT team_id FROM donut_team_invites WHERE player_uuid = ? ORDER BY created_at DESC";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, playerUuid.toString());
+                ResultSet rs = stmt.executeQuery();
+                while (rs.next()) {
+                    teamIds.add(rs.getInt("team_id"));
+                }
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Failed to get player invites: " + e.getMessage());
+        }
+        return teamIds;
+    }
+
+    @Override
+    public void clearPlayerInvites(UUID playerUuid) {
+        if (!isConnected() || playerUuid == null) {
+            return;
+        }
+        
+        try (Connection conn = getConnection()) {
+            String sql = "DELETE FROM donut_team_invites WHERE player_uuid = ?";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, playerUuid.toString());
+                stmt.executeUpdate();
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Failed to clear player invites: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public List<TeamInvite> getPlayerInvitesWithDetails(UUID playerUuid) {
+        List<TeamInvite> invites = new ArrayList<>();
+        if (!isConnected() || playerUuid == null) {
+            return invites;
+        }
+        
+        try (Connection conn = getConnection()) {
+            String sql = "SELECT i.team_id, t.name as team_name, i.inviter_uuid, i.created_at " +
+                        "FROM donut_team_invites i " +
+                        "JOIN donut_teams t ON i.team_id = t.id " +
+                        "WHERE i.player_uuid = ? " +
+                        "ORDER BY i.created_at DESC";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, playerUuid.toString());
+                ResultSet rs = stmt.executeQuery();
+                while (rs.next()) {
+                    int teamId = rs.getInt("team_id");
+                    String teamName = rs.getString("team_name");
+                    UUID inviterUuid = UUID.fromString(rs.getString("inviter_uuid"));
+                    Timestamp createdAt = rs.getTimestamp("created_at");
+                    
+                    String inviterName = getPlayerNameByUuid(inviterUuid).orElse("Unknown");
+                    
+                    invites.add(new TeamInvite(teamId, teamName, inviterUuid, inviterName, createdAt));
+                }
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Failed to get player invites with details: " + e.getMessage());
+        }
+        return invites;
+    }
+
+    @Override
+    public void updatePlayerSession(UUID playerUuid, String serverName) {
+        if (!isConnected() || playerUuid == null || serverName == null) {
+            return;
+        }
+        
+        try (Connection conn = getConnection()) {
+            String sql;
+            if ("mysql".equals(storageType)) {
+                sql = "INSERT INTO donut_player_sessions (player_uuid, server_name, last_seen) " +
+                     "VALUES (?, ?, CURRENT_TIMESTAMP) " +
+                     "ON DUPLICATE KEY UPDATE server_name = VALUES(server_name), last_seen = CURRENT_TIMESTAMP";
+            } else {
+                sql = "MERGE INTO donut_player_sessions (player_uuid, server_name, last_seen) " +
+                     "KEY(player_uuid) VALUES (?, ?, CURRENT_TIMESTAMP)";
+            }
+            
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, playerUuid.toString());
+                stmt.setString(2, serverName);
+                stmt.executeUpdate();
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Failed to update player session: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public Optional<PlayerSession> getPlayerSession(UUID playerUuid) {
+        if (!isConnected() || playerUuid == null) {
+            return Optional.empty();
+        }
+        
+        try (Connection conn = getConnection()) {
+            String sql = "SELECT player_uuid, server_name, last_seen FROM donut_player_sessions WHERE player_uuid = ?";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, playerUuid.toString());
+                ResultSet rs = stmt.executeQuery();
+                if (rs.next()) {
+                    return Optional.of(new PlayerSession(
+                        UUID.fromString(rs.getString("player_uuid")),
+                        rs.getString("server_name"),
+                        rs.getTimestamp("last_seen")
+                    ));
+                }
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Failed to get player session: " + e.getMessage());
+        }
+        return Optional.empty();
+    }
+
+    @Override
+    public Map<UUID, PlayerSession> getTeamPlayerSessions(int teamId) {
+        Map<UUID, PlayerSession> sessions = new HashMap<>();
+        if (!isConnected()) {
+            return sessions;
+        }
+        
+        try (Connection conn = getConnection()) {
+            String sql = "SELECT s.player_uuid, s.server_name, s.last_seen " +
+                        "FROM donut_player_sessions s " +
+                        "JOIN donut_team_members m ON s.player_uuid = m.player_uuid " +
+                        "WHERE m.team_id = ?";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setInt(1, teamId);
+                ResultSet rs = stmt.executeQuery();
+                while (rs.next()) {
+                    UUID playerUuid = UUID.fromString(rs.getString("player_uuid"));
+                    PlayerSession session = new PlayerSession(
+                        playerUuid,
+                        rs.getString("server_name"),
+                        rs.getTimestamp("last_seen")
+                    );
+                    sessions.put(playerUuid, session);
+                }
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Failed to get team player sessions: " + e.getMessage());
+        }
+        return sessions;
+    }
+
+    @Override
+    public void cleanupStaleSessions(int minutesOld) {
+        if (!isConnected()) {
+            return;
+        }
+        
+        try (Connection conn = getConnection()) {
+            String sql;
+            if ("mysql".equals(storageType)) {
+                sql = "DELETE FROM donut_player_sessions WHERE last_seen < DATE_SUB(NOW(), INTERVAL ? MINUTE)";
+            } else {
+                sql = "DELETE FROM donut_player_sessions WHERE last_seen < DATEADD('MINUTE', ?, CURRENT_TIMESTAMP)";
+            }
+            
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setInt(1, -minutesOld);
+                int deleted = stmt.executeUpdate();
+                if (deleted > 0) {
+                    plugin.getLogger().info("Cleaned up " + deleted + " stale player sessions");
+                }
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Failed to cleanup stale sessions: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public void setServerAlias(String serverName, String alias) {
+        if (!isConnected() || serverName == null || alias == null) {
+            return;
+        }
+        
+        try (Connection conn = getConnection()) {
+            String sql = "INSERT INTO donut_server_aliases (server_name, alias, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) " +
+                        "ON DUPLICATE KEY UPDATE alias = ?, updated_at = CURRENT_TIMESTAMP";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, serverName);
+                stmt.setString(2, alias);
+                stmt.setString(3, alias);
+                stmt.executeUpdate();
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Failed to set server alias: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public Optional<String> getServerAlias(String serverName) {
+        if (!isConnected() || serverName == null) {
+            return Optional.empty();
+        }
+        
+        try (Connection conn = getConnection()) {
+            String sql = "SELECT alias FROM donut_server_aliases WHERE server_name = ?";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, serverName);
+                ResultSet rs = stmt.executeQuery();
+                if (rs.next()) {
+                    return Optional.of(rs.getString("alias"));
+                }
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Failed to get server alias: " + e.getMessage());
+        }
+        return Optional.empty();
+    }
+
+    @Override
+    public Map<String, String> getAllServerAliases() {
+        Map<String, String> aliases = new HashMap<>();
+        if (!isConnected()) {
+            return aliases;
+        }
+        
+        try (Connection conn = getConnection()) {
+            String sql = "SELECT server_name, alias FROM donut_server_aliases";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                ResultSet rs = stmt.executeQuery();
+                while (rs.next()) {
+                    aliases.put(rs.getString("server_name"), rs.getString("alias"));
+                }
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Failed to get all server aliases: " + e.getMessage());
+        }
+        return aliases;
+    }
+
+    @Override
+    public void removeServerAlias(String serverName) {
+        if (!isConnected() || serverName == null) {
+            return;
+        }
+        
+        try (Connection conn = getConnection()) {
+            String sql = "DELETE FROM donut_server_aliases WHERE server_name = ?";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, serverName);
+                stmt.executeUpdate();
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Failed to remove server alias: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public void setTeamRenameTimestamp(int teamId, Timestamp timestamp) {
+        if (!isConnected()) {
+            return;
+        }
+        
+        try (Connection conn = getConnection()) {
+            String sql = "INSERT INTO donut_team_rename_cooldowns (team_id, last_rename) VALUES (?, ?) " +
+                        "ON DUPLICATE KEY UPDATE last_rename = ?";
+            
+            if (storageType.equals("h2")) {
+                sql = "MERGE INTO donut_team_rename_cooldowns (team_id, last_rename) KEY(team_id) VALUES (?, ?)";
+            }
+            
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setInt(1, teamId);
+                stmt.setTimestamp(2, timestamp);
+                if (!storageType.equals("h2")) {
+                    stmt.setTimestamp(3, timestamp);
+                }
+                stmt.executeUpdate();
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Failed to set team rename timestamp: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public Optional<Timestamp> getTeamRenameTimestamp(int teamId) {
+        if (!isConnected()) {
+            return Optional.empty();
+        }
+        
+        try (Connection conn = getConnection()) {
+            String sql = "SELECT last_rename FROM donut_team_rename_cooldowns WHERE team_id = ?";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setInt(1, teamId);
+                ResultSet rs = stmt.executeQuery();
+                if (rs.next()) {
+                    return Optional.of(rs.getTimestamp("last_rename"));
+                }
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Failed to get team rename timestamp: " + e.getMessage());
+        }
+        return Optional.empty();
+    }
+
+    @Override
+    public void setTeamName(int teamId, String newName) {
+        if (!isConnected() || newName == null || newName.isEmpty()) {
+            return;
+        }
+        
+        try (Connection conn = getConnection()) {
+            String sql = "UPDATE donut_teams SET name = ? WHERE id = ?";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, newName);
+                stmt.setInt(2, teamId);
+                int rowsAffected = stmt.executeUpdate();
+                if (rowsAffected > 0) {
+                    plugin.getLogger().info("Team ID " + teamId + " renamed to: " + newName);
+                }
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Failed to set team name: " + e.getMessage());
         }
     }
 }

@@ -66,6 +66,9 @@ public class TeamGUI implements IRefreshableGUI, InventoryHolder {
                 .build();
         for (int i = 0; i < 9; i++) inventory.setItem(i, border);
         for (int i = 45; i < 54; i++) inventory.setItem(i, border);
+        
+        loadCustomDummyItems(guiConfig);
+        
         int memberSlot = 9;
         for (TeamPlayer member : team.getSortedMembers(currentSort)) {
             if (memberSlot >= 45) break;
@@ -185,27 +188,99 @@ public class TeamGUI implements IRefreshableGUI, InventoryHolder {
                 .replace("<permission_prompt>", pvpPrompt)
                 .replace("<sort_status_join_date>", getSortLore(Team.SortType.JOIN_DATE))
                 .replace("<sort_status_alphabetical>", getSortLore(Team.SortType.ALPHABETICAL))
-                .replace("<sort_status_online_status>", getSortLore(Team.SortType.ONLINE_STATUS));
+                .replace("<sort_status_online_status>", getSortLore(Team.SortType.ONLINE_STATUS))
+                .replace("<team_name>", team.getName())
+                .replace("<team_tag>", team.getTag())
+                .replace("<team_description>", team.getDescription());
     }
     private ItemStack createMemberHead(TeamPlayer member, ConfigurationSection headConfig) {
         String playerName = Bukkit.getOfflinePlayer(member.getPlayerUuid()).getName();
+        
+        boolean isBedrockPlayer = plugin.getBedrockSupport() != null && 
+                                  plugin.getBedrockSupport().isBedrockPlayer(member.getPlayerUuid());
+        String platformIndicator = "";
+        if (plugin.getGuiConfigManager().getPlaceholder("platform.show_in_gui", "true").equals("true")) {
+            if (isBedrockPlayer && plugin.getGuiConfigManager().getPlaceholder("platform.bedrock.enabled", "true").equals("true")) {
+                platformIndicator = plugin.getGuiConfigManager().getPlaceholder("platform.bedrock.format", " <#00D4FF>[BE]</#00D4FF>");
+            } else if (!isBedrockPlayer && plugin.getGuiConfigManager().getPlaceholder("platform.java.enabled", "true").equals("true")) {
+                platformIndicator = plugin.getGuiConfigManager().getPlaceholder("platform.java.format", " <#00FF00>[JE]</#00FF00>");
+            }
+        }
+        
+        String crossServerStatus = "";
+        if (member.isOnline() && plugin.getConfigManager().isCrossServerSyncEnabled() && 
+            plugin.getConfigManager().getBoolean("features.show_cross_server_status", true)) {
+            
+            Optional<IDataStorage.PlayerSession> sessionOpt = 
+                plugin.getStorageManager().getStorage().getPlayerSession(member.getPlayerUuid());
+            
+            if (sessionOpt.isPresent()) {
+                String currentServer = plugin.getConfigManager().getServerIdentifier();
+                String playerServer = sessionOpt.get().serverName();
+                
+                if (!currentServer.equalsIgnoreCase(playerServer)) {
+                    String displayServer = plugin.getStorageManager().getStorage()
+                        .getServerAlias(playerServer).orElse(playerServer);
+                    crossServerStatus = " <gray>(<yellow>" + displayServer + "</yellow>)</gray>";
+                }
+            }
+        }
+        
         String nameFormat = member.isOnline() ?
                 headConfig.getString("online-name-format", "<green><player>") :
                 headConfig.getString("offline-name-format", "<gray><player>");
         String name = nameFormat
                 .replace("<status_indicator>", getStatusIndicator(member.isOnline()))
                 .replace("<role_icon>", getRoleIcon(member.getRole()))
-                .replace("<player>", playerName != null ? playerName : "Unknown");
+                .replace("<player>", playerName != null ? playerName : "Unknown") + platformIndicator + crossServerStatus;
         String joinDateStr = formatJoinDate(member.getJoinDate(), playerName);
-        List<String> lore = headConfig.getStringList("lore").stream()
+        
+        final String serverInfo;
+        if (member.isOnline() && plugin.getConfigManager().isCrossServerSyncEnabled() && 
+            plugin.getConfigManager().getBoolean("features.show_cross_server_status", true)) {
+            
+            Optional<IDataStorage.PlayerSession> sessionOpt = 
+                plugin.getStorageManager().getStorage().getPlayerSession(member.getPlayerUuid());
+            
+            if (sessionOpt.isPresent()) {
+                String currentServer = plugin.getConfigManager().getServerIdentifier();
+                String playerServer = sessionOpt.get().serverName();
+                
+                if (!currentServer.equalsIgnoreCase(playerServer)) {
+                    String displayServer = plugin.getStorageManager().getStorage()
+                        .getServerAlias(playerServer).orElse(playerServer);
+                    serverInfo = displayServer;
+                } else {
+                    serverInfo = currentServer;
+                }
+            } else {
+                serverInfo = "Local";
+            }
+        } else if (!member.isOnline()) {
+            serverInfo = "<dark_gray>Offline</dark_gray>";
+        } else {
+            serverInfo = "Local";
+        }
+        
+        List<String> loreLines = new ArrayList<>(headConfig.getStringList("lore").stream()
                 .map(line -> line
                         .replace("<role>", getRoleName(member.getRole()))
-                        .replace("<joindate>", joinDateStr))
-                .collect(Collectors.toList());
+                        .replace("<joindate>", joinDateStr)
+                        .replace("<server>", serverInfo))
+                .collect(Collectors.toList()));
+        
+        if (isBedrockPlayer && plugin.getGuiConfigManager().getPlaceholder("platform.show_gamertags", "true").equals("true")) {
+            String gamertag = plugin.getBedrockSupport().getBedrockGamertag(member.getPlayerUuid());
+            if (gamertag != null && !gamertag.equals(playerName)) {
+                String gamertagColor = plugin.getGuiConfigManager().getPlaceholder("platform.bedrock.color", "#00D4FF");
+                loreLines.add("<gray>Gamertag: <" + gamertagColor + ">" + gamertag + "</" + gamertagColor + ">");
+            }
+        }
+        
         ItemBuilder builder = new ItemBuilder(Material.PLAYER_HEAD)
                 .asPlayerHead(member.getPlayerUuid())
                 .withName(name)
-                .withLore(lore);
+                .withLore(loreLines);
         TeamPlayer viewerMember = team.getMember(viewer.getUniqueId());
         if (viewerMember != null) {
             boolean canEdit = false;
@@ -259,11 +334,16 @@ public class TeamGUI implements IRefreshableGUI, InventoryHolder {
     private String getRoleName(TeamRole role) {
         return plugin.getGuiConfigManager().getRoleName(role.name());
     }
+    
+    private void loadCustomDummyItems(ConfigurationSection guiConfig) {
+        GUIManager.loadDummyItems(inventory, guiConfig);
+    }
+    
     public void open() {
         viewer.openInventory(inventory);
     }
     public void refresh() {
-        open();
+        initializeItems();
     }
     public void cycleSort() {
         currentSort = switch (currentSort) {

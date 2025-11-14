@@ -13,6 +13,8 @@ public class PvPListener implements Listener {
     public PvPListener(JustTeams plugin) {
         this.teamManager = plugin.getTeamManager();
     }
+    
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onEntityDamage(EntityDamageByEntityEvent event) {
         if (!(event.getEntity() instanceof Player victim)) {
             return;
@@ -28,11 +30,14 @@ public class PvPListener implements Listener {
         if (attacker == null || attacker.getUniqueId().equals(victim.getUniqueId())) {
             return;
         }
-        Team victimTeam = teamManager.getPlayerTeam(victim.getUniqueId());
-        Team attackerTeam = teamManager.getPlayerTeam(attacker.getUniqueId());
+        
+        Team victimTeam = teamManager.getPlayerTeamCached(victim.getUniqueId());
+        Team attackerTeam = teamManager.getPlayerTeamCached(attacker.getUniqueId());
+        
         if (victimTeam == null || attackerTeam == null || victimTeam.getId() != attackerTeam.getId()) {
             return;
         }
+        
         if (!victimTeam.isPvpEnabled()) {
             event.setCancelled(true);
         }
