@@ -1645,7 +1645,7 @@ If you encounter issues not covered here:
 | **Database Support** | H2 (embedded), MySQL 8.0+, MariaDB 10.5+ |
 | **Cache Support** | Redis 5.0+ (optional) |
 | **Dependencies** | Vault, PlaceholderAPI, PvPManager (all optional) |
-| **License** | MIT |
+| **License** | CC BY-NC-SA 4.0 |
 | **Author** | kotori |
 
 ### Feature Matrix
@@ -1731,7 +1731,7 @@ If you encounter issues not covered here:
 
 **JustTeams** is developed and maintained with care by **kotori**.
 
-This plugin is open-source software, licensed under the MIT License.
+This plugin is open-source software, licensed under the CC BY-NC-SA 4.0 License
 
 ---
 
