@@ -605,24 +605,7 @@ public class TeamGUIListener implements Listener {
         switch (action) {
             case "create-team" -> {
                 player.closeInventory();
-                plugin.getMessageManager().sendRawMessage(player, plugin.getMessageManager().getRawMessage("prompt_team_name"));
-                plugin.getChatInputManager().awaitInput(player, null, teamName -> {
-                    String validationError = teamManager.validateTeamName(teamName);
-                    if (validationError != null) {
-                        plugin.getMessageManager().sendRawMessage(player, plugin.getMessageManager().getRawMessage("prefix") + validationError);
-                        plugin.getTaskRunner().runOnEntity(player, () -> new NoTeamGUI(plugin, player).open());
-                        return;
-                    }
-                    
-                    if (plugin.getConfigManager().isTeamTagEnabled()) {
-                        plugin.getMessageManager().sendRawMessage(player, plugin.getMessageManager().getRawMessage("prompt_team_tag"));
-                        plugin.getChatInputManager().awaitInput(player, null, teamTag -> {
-                            teamManager.createTeam(player, teamName, teamTag);
-                        });
-                    } else {
-                        teamManager.createTeam(player, teamName, "");
-                    }
-                });
+                plugin.getMessageManager().sendRawMessage(player, "<yellow>Please use <white>/team create <name> <yellow>to create a team.");
             }
             case "leaderboards" -> new LeaderboardCategoryGUI(plugin, player).open();
         }

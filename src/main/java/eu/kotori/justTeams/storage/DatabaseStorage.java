@@ -395,7 +395,7 @@ public class DatabaseStorage implements IDataStorage {
             "CREATE TABLE IF NOT EXISTS `donut_teams` (" +
             "`id` INT AUTO_INCREMENT, " +
             "`name` VARCHAR(16) NOT NULL UNIQUE, " +
-            "`tag` VARCHAR(6) NOT NULL, " +
+            "`tag` VARCHAR(20) NOT NULL, " +
             "`owner_uuid` VARCHAR(36) NOT NULL, " +
             "`home_location` VARCHAR(255), " +
             "`home_server` VARCHAR(255), " +
@@ -561,7 +561,7 @@ public class DatabaseStorage implements IDataStorage {
             "CREATE TABLE IF NOT EXISTS `donut_teams` (" +
             "`id` INT AUTO_INCREMENT, " +
             "`name` VARCHAR(16) NOT NULL UNIQUE, " +
-            "`tag` VARCHAR(6) NOT NULL, " +
+            "`tag` VARCHAR(20) NOT NULL, " +
             "`owner_uuid` VARCHAR(36) NOT NULL, " +
             "`home_location` VARCHAR(255), " +
             "`home_server` VARCHAR(255), " +

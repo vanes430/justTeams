@@ -303,7 +303,8 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
         }
         
         String teamName = args[1];
-        String teamTag = tagEnabled && args.length >= 3 ? args[2] : "";
+        // If tag is not provided, use teamName as tag
+        String teamTag = (args.length >= 3) ? args[2] : teamName;
         
         if (tagEnabled) {
             if (!validateTeamNameAndTag(teamName, teamTag)) {

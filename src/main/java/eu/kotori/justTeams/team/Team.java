@@ -135,7 +135,12 @@ public class Team implements InventoryHolder {
     public void setName(String name) { this.name = name; }
     public void setTag(String tag) { this.tag = tag; }
     public String getColoredName() { return name; }
-    public String getColoredTag() { return tag != null ? tag : ""; }
+    public String getColoredTag() { 
+        if (tag == null) return "";
+        // Convert legacy ampersand codes (e.g., &a) to MiniMessage tags (e.g., <green>)
+        net.kyori.adventure.text.Component component = net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacyAmpersand().deserialize(tag);
+        return net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().serialize(component);
+    }
     public String getPlainName() { return stripColorCodes(name); }
     public String getPlainTag() { return stripColorCodes(tag != null ? tag : ""); }
     private String stripColorCodes(String text) {
