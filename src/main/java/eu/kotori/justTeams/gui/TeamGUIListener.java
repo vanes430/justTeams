@@ -461,17 +461,12 @@ public class TeamGUIListener implements Listener {
                     return;
                 }
                 player.closeInventory();
-                String setting = isTag ? "tag" : "description";
-                String prompt = plugin.getMessageManager().getRawMessage("prompt_setting_change").replace("<setting>", setting);
-                plugin.getMessageManager().sendRawMessage(player, prompt);
-                plugin.getChatInputManager().awaitInput(player, gui, input -> {
-                    if (isTag) {
-                        teamManager.setTeamTag(player, input);
-                    } else {
-                        teamManager.setTeamDescription(player, input);
-                    }
-                    plugin.getTaskRunner().runOnEntity(player, gui::open);
-                });
+                
+                if (isTag) {
+                    plugin.getMessageManager().sendMessage(player, "usage_settag");
+                } else {
+                    plugin.getMessageManager().sendMessage(player, "usage_setdescription");
+                }
             }
         }
     }
