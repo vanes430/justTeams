@@ -84,7 +84,7 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
             case "sethome" -> handleSetHome(player);
             case "delhome" -> handleDelHome(player);
             case "home" -> handleHome(player);
-            case "settag" -> handleSetTag(player, args);
+            case "settag", "setprefix" -> handleSetTag(player, args);
             case "setdesc" -> handleSetDescription(player, args);
             case "rename" -> handleRename(player, args);
             case "transfer" -> handleTransfer(player, args);
@@ -208,12 +208,15 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
         if (tag == null || tag.length() < 2 || tag.length() > plugin.getConfigManager().getMaxTagLength()) {
             return false;
         }
-        String plainName = stripColorCodes(name);
-        String plainTag = stripColorCodes(tag);
-        
-        if (!plainName.matches("^[a-zA-Z0-9_]+$")) {
+
+        // ID (Name) cannot contain color codes
+        if (!name.matches("^[a-zA-Z0-9_]+$")) {
             return false;
         }
+
+        String plainName = name;
+        String plainTag = stripColorCodes(tag);
+        
         if (!plainTag.matches("^[a-zA-Z0-9_]+$")) {
             return false;
         }
@@ -308,11 +311,12 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
                 return;
             }
         } else {
-            String plainName = stripColorCodes(teamName);
-            if (!plainName.matches("^[a-zA-Z0-9_]+$")) {
+            // ID (Name) cannot contain color codes
+            if (!teamName.matches("^[a-zA-Z0-9_]+$")) {
                 plugin.getMessageManager().sendMessage(player, "invalid_team_name");
                 return;
             }
+            String plainName = teamName;
             String lowerName = plainName.toLowerCase();
             String[] inappropriate = {"admin", "mod", "staff", "owner", "server", "minecraft", "bukkit", "spigot"};
             for (String word : inappropriate) {
@@ -735,7 +739,7 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
         }
         String tag = args[1];
         String plainTag = stripColorCodes(tag);
-        if (plainTag.length() < 2 || plainTag.length() > plugin.getConfigManager().getMaxTagLength() || !plainTag.matches("^[a-zA-Z0-9_]+$")) {
+        if (tag.length() < 2 || tag.length() > plugin.getConfigManager().getMaxTagLength() || !plainTag.matches("^[a-zA-Z0-9_]+$")) {
             plugin.getMessageManager().sendMessage(player, "invalid_team_tag");
             return;
         }
@@ -799,7 +803,13 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
             return;
         }
         
-        String plainName = stripColorCodes(newName);
+        // ID (Name) cannot contain color codes
+        if (!newName.matches("^[a-zA-Z0-9_]+$")) {
+            plugin.getMessageManager().sendMessage(player, "invalid_team_name");
+            return;
+        }
+        String plainName = newName;
+
         int minLength = plugin.getConfigManager().getMinNameLength();
         int maxLength = plugin.getConfigManager().getMaxNameLength();
         
@@ -812,11 +822,6 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
         if (plainName.length() > maxLength) {
             plugin.getMessageManager().sendMessage(player, "name_too_long",
                 Placeholder.unparsed("max_length", String.valueOf(maxLength)));
-            return;
-        }
-        
-        if (!plainName.matches("^[a-zA-Z0-9_]+$")) {
-            plugin.getMessageManager().sendMessage(player, "invalid_team_name");
             return;
         }
         
@@ -1871,6 +1876,7 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
             
             if (plugin.getConfigManager().isTeamTagEnabled()) {
                 completions.add("settag");
+                completions.add("setprefix");
             }
             
             completions.add("setdesc");

@@ -213,8 +213,8 @@ settings:
   # Team Limits
   max_team_size: 10
   min_name_length: 3
-  max_name_length: 16
-  max_tag_length: 6
+  max_name_length: 12
+  max_tag_length: 20
   max_description_length: 64
   
   allow_formatting_codes: true

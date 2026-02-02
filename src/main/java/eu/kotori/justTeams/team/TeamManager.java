@@ -481,10 +481,12 @@ public class TeamManager {
         }
     }
     public String validateTeamName(String name) {
-        if (containsBlockedFormattingCodes(name)) {
-            return messageManager.getRawMessage("name_contains_blocked_codes");
+        // ID (Name) cannot contain color codes or special characters
+        if (!name.matches("^[a-zA-Z0-9_]+$")) {
+            return messageManager.getRawMessage("name_invalid");
         }
-        String plainName = stripColorCodes(name);
+        
+        String plainName = name;
         if (plainName.length() < configManager.getMinNameLength()) {
             return messageManager.getRawMessage("name_too_short").replace("<min_length>", String.valueOf(configManager.getMinNameLength()));
         }
@@ -1101,7 +1103,7 @@ public class TeamManager {
             return;
         }
         String plainTag = stripColorCodes(newTag);
-        if (plainTag.length() > configManager.getMaxTagLength() || !plainTag.matches("[a-zA-Z0-9]+")) {
+        if (newTag.length() > configManager.getMaxTagLength() || !plainTag.matches("[a-zA-Z0-9_]+")) {
             messageManager.sendMessage(player, "tag_invalid");
             return;
         }
