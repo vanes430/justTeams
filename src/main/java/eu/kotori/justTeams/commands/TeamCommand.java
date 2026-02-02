@@ -1257,6 +1257,16 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
             plugin.getAliasManager().reload();
             plugin.getGuiConfigManager().testPlaceholders();
             
+            // Reload storage and flush cache
+            plugin.getLogger().info("Reloading database connection...");
+            teamManager.flushCache();
+            if (plugin.getStorageManager().reload()) {
+                plugin.getLogger().info("✓ Database connection reloaded successfully!");
+            } else {
+                plugin.getLogger().severe("✗ Failed to reload database connection!");
+                sender.sendMessage("§c✗ Failed to reload database. Check console for details.");
+            }
+            
             plugin.getMessageManager().sendMessage(sender, "reload");
             if (sender instanceof Player) {
                 plugin.getMessageManager().sendMessage(sender, "reload_commands_notice");

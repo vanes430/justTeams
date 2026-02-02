@@ -285,6 +285,18 @@ public class TeamManager {
             }
         }
     }
+    public void flushCache() {
+        synchronized (cacheLock) {
+            teamNameCache.clear();
+            playerTeamCache.clear();
+            teamInvites.invalidateAll();
+            joinRequestCooldowns.invalidateAll();
+            teamLastModified.clear();
+            teleportTasks.values().forEach(CancellableTask::cancel);
+            teleportTasks.clear();
+            plugin.getLogger().info("Team cache flushed.");
+        }
+    }
     public void addTeamToCache(Team team) {
         synchronized (cacheLock) {
             teamNameCache.put(team.getName().toLowerCase(), team);

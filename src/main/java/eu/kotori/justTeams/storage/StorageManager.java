@@ -8,6 +8,10 @@ public class StorageManager {
     public boolean init() {
         return storage.init();
     }
+    public boolean reload() {
+        shutdown();
+        return init();
+    }
     public void shutdown() {
         storage.shutdown();
     }

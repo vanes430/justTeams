@@ -407,29 +407,7 @@ public class TeamGUIListener implements Listener {
                     return;
                 }
                 player.closeInventory();
-                boolean isDeposit = action.equals("deposit");
-                String promptAction = isDeposit ? "deposit" : "withdraw";
-                String prompt = plugin.getMessageManager().getRawMessage("prompt_bank_amount").replace("<action>", promptAction);
-                plugin.getMessageManager().sendRawMessage(player, prompt);
-                plugin.getChatInputManager().awaitInput(player, gui, input -> {
-                    try {
-                        double amount = Double.parseDouble(input);
-                        if (amount <= 0) {
-                            plugin.getMessageManager().sendMessage(player, "bank_invalid_amount");
-                        } else if (amount > 1_000_000_000) {
-                            plugin.getMessageManager().sendMessage(player, "bank_amount_too_large");
-                        } else {
-                            if (isDeposit) {
-                                teamManager.deposit(player, amount);
-                            } else {
-                                teamManager.withdraw(player, amount);
-                            }
-                        }
-                    } catch (NumberFormatException e) {
-                        plugin.getMessageManager().sendMessage(player, "bank_invalid_amount");
-                    }
-                    plugin.getTaskRunner().runOnEntity(player, gui::open);
-                });
+                plugin.getMessageManager().sendMessage(player, "usage_bank");
             }
         }
     }
@@ -620,14 +598,7 @@ public class TeamGUIListener implements Listener {
             }
             case "view-enderchest" -> {
                 player.closeInventory();
-                plugin.getChatInputManager().awaitInput(player, null, (input) -> {
-                    if (input == null || input.trim().isEmpty()) {
-                        plugin.getMessageManager().sendMessage(player, "invalid_input");
-                        return;
-                    }
-                    teamManager.adminOpenEnderChest(player, input.trim());
-                });
-                plugin.getMessageManager().sendMessage(player, "admin_enderchest_input_prompt");
+                plugin.getMessageManager().sendMessage(player, "usage_admin_enderchest");
             }
             case "reload-plugin" -> {
                 player.closeInventory();
