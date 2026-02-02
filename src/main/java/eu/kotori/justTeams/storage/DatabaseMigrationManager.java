@@ -13,8 +13,9 @@ import java.util.logging.Level;
 public class DatabaseMigrationManager {
     private final JustTeams plugin;
     private final DatabaseStorage databaseStorage;
-    private static final int CURRENT_SCHEMA_VERSION = 4;
-    public DatabaseMigrationManager(JustTeams plugin, DatabaseStorage databaseStorage) {
+        private static final int CURRENT_SCHEMA_VERSION = 5;
+    
+        public DatabaseMigrationManager(JustTeams plugin, DatabaseStorage databaseStorage) {
         this.plugin = plugin;
         this.databaseStorage = databaseStorage;
     }
@@ -119,6 +120,7 @@ public class DatabaseMigrationManager {
         migrations.add(new Migration(2, "Add member permission columns", this::migration2_AddMemberPermissions));
         migrations.add(new Migration(3, "Add blacklist table and fix column issues", this::migration3_AddBlacklistAndFixColumns));
         migrations.add(new Migration(4, "Add cross-server tables and missing features", this::migration4_AddCrossServerTables));
+        migrations.add(new Migration(5, "Add unique constraint to team tags", this::migration5_AddUniqueTagConstraint));
         return migrations;
     }
     private boolean migration2_AddMemberPermissions(DatabaseStorage storage) {
@@ -163,6 +165,69 @@ public class DatabaseMigrationManager {
             return true;
         } catch (Exception e) {
             plugin.getLogger().log(Level.SEVERE, "Migration 4 failed: " + e.getMessage(), e);
+            return false;
+        }
+    }
+
+    private boolean migration5_AddUniqueTagConstraint(DatabaseStorage storage) {
+        try (Connection conn = storage.getConnection()) {
+            // First, identify and resolve any duplicate tags that might exist
+            String findDuplicatesSQL = "SELECT tag, COUNT(*) as count FROM donut_teams GROUP BY tag HAVING COUNT(*) > 1";
+            try (Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(findDuplicatesSQL)) {
+                while (rs.next()) {
+                    String duplicateTag = rs.getString("tag");
+                    plugin.getLogger().warning("Found duplicate team tag: " + duplicateTag + ". Resolving duplicates...");
+                    
+                    // Rename duplicates by appending #ID to them
+                    String resolveSQL = "SELECT id FROM donut_teams WHERE tag = ?";
+                    try (PreparedStatement resolveStmt = conn.prepareStatement(resolveSQL)) {
+                        resolveStmt.setString(1, duplicateTag);
+                        try (ResultSet rsIds = resolveStmt.executeQuery()) {
+                            boolean first = true;
+                            while (rsIds.next()) {
+                                if (first) {
+                                    first = false;
+                                    continue; // Keep the first one as is
+                                }
+                                int id = rsIds.getInt("id");
+                                String newTag = duplicateTag + "#" + id;
+                                if (newTag.length() > 20) {
+                                    newTag = newTag.substring(0, 15) + "#" + id;
+                                }
+                                String updateSQL = "UPDATE donut_teams SET tag = ? WHERE id = ?";
+                                try (PreparedStatement updateStmt = conn.prepareStatement(updateSQL)) {
+                                    updateStmt.setString(1, newTag);
+                                    updateStmt.setInt(2, id);
+                                    updateStmt.executeUpdate();
+                                    plugin.getLogger().info("Renamed duplicate tag for team ID " + id + " to " + newTag);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Now add the unique constraint
+            String addUniqueIndex;
+            if (storage.getStorageType().equals("mysql") || storage.getStorageType().equals("mariadb")) {
+                addUniqueIndex = "ALTER TABLE donut_teams ADD UNIQUE INDEX idx_unique_tag (tag)";
+            } else {
+                addUniqueIndex = "CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_tag ON donut_teams (tag)";
+            }
+            
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute(addUniqueIndex);
+                plugin.getLogger().info("Successfully added unique constraint to team tags.");
+            }
+            
+            return true;
+        } catch (Exception e) {
+            // If the error is that the index already exists, we consider it a success
+            if (e.getMessage().contains("Duplicate key name") || e.getMessage().contains("already exists")) {
+                plugin.getLogger().info("Unique index on team tags already exists.");
+                return true;
+            }
+            plugin.getLogger().log(Level.SEVERE, "Migration 5 failed: " + e.getMessage(), e);
             return false;
         }
     }

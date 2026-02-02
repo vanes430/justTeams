@@ -28,8 +28,11 @@ public interface IDataStorage {
     boolean addMemberToTeam(int teamId, UUID playerUuid);
     void removeMemberFromTeam(UUID playerUuid);
     Optional<Team> findTeamByPlayer(UUID playerUuid);
-    Optional<Team> findTeamByName(String name);
-    Optional<Team> findTeamById(int id);
+        Optional<Team> findTeamByName(String name);
+        
+        Optional<Team> findTeamByTag(String tag);
+    
+        Optional<Team> findTeamById(int id);
     List<Team> getAllTeams();
     List<TeamPlayer> getTeamMembers(int teamId);
     void setTeamHome(int teamId, Location location, String serverName);

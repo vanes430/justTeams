@@ -21,6 +21,10 @@ public class DatabaseStorage implements IDataStorage {
         this.plugin = plugin;
         this.storageType = plugin.getConfig().getString("storage.type", "h2").toLowerCase();
     }
+    public String getStorageType() {
+        return storageType;
+    }
+
     @Override
     public boolean init() {
         HikariConfig config = new HikariConfig();
@@ -395,7 +399,7 @@ public class DatabaseStorage implements IDataStorage {
             "CREATE TABLE IF NOT EXISTS `donut_teams` (" +
             "`id` INT AUTO_INCREMENT, " +
             "`name` VARCHAR(16) NOT NULL UNIQUE, " +
-            "`tag` VARCHAR(20) NOT NULL, " +
+            "`tag` VARCHAR(20) NOT NULL UNIQUE, " +
             "`owner_uuid` VARCHAR(36) NOT NULL, " +
             "`home_location` VARCHAR(255), " +
             "`home_server` VARCHAR(255), " +
@@ -561,7 +565,7 @@ public class DatabaseStorage implements IDataStorage {
             "CREATE TABLE IF NOT EXISTS `donut_teams` (" +
             "`id` INT AUTO_INCREMENT, " +
             "`name` VARCHAR(16) NOT NULL UNIQUE, " +
-            "`tag` VARCHAR(20) NOT NULL, " +
+            "`tag` VARCHAR(20) NOT NULL UNIQUE, " +
             "`owner_uuid` VARCHAR(36) NOT NULL, " +
             "`home_location` VARCHAR(255), " +
             "`home_server` VARCHAR(255), " +
@@ -1011,6 +1015,21 @@ public class DatabaseStorage implements IDataStorage {
             }
         } catch (SQLException e) {
             plugin.getLogger().severe("Error finding team by name: " + e.getMessage());
+        }
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<Team> findTeamByTag(String tag) {
+        String sql = "SELECT * FROM donut_teams WHERE tag = ?";
+        try (Connection conn = getConnection(); PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, tag);
+            ResultSet rs = stmt.executeQuery();
+            if (rs.next()) {
+                return Optional.of(mapTeamFromResultSet(rs));
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Error finding team by tag: " + e.getMessage());
         }
         return Optional.empty();
     }

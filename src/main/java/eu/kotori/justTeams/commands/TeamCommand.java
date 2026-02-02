@@ -292,40 +292,24 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
             return;
         }
         
-        boolean tagEnabled = plugin.getConfigManager().isTeamTagEnabled();
-        
-        if (tagEnabled && args.length < 3) {
-            plugin.getMessageManager().sendMessage(player, "usage_create");
-            return;
-        } else if (!tagEnabled && args.length < 2) {
+        // Only accept /team create <name>
+        if (args.length != 2) {
             plugin.getMessageManager().sendMessage(player, "usage_create_no_tag");
             return;
         }
         
         String teamName = args[1];
-        // If tag is not provided, use teamName as tag
-        String teamTag = (args.length >= 3) ? args[2] : teamName;
+        String teamTag = teamName; // Always identical on creation
         
-        if (tagEnabled) {
-            if (!validateTeamNameAndTag(teamName, teamTag)) {
-                plugin.getMessageManager().sendMessage(player, "invalid_team_name_or_tag");
-                return;
-            }
-        } else {
-            // ID (Name) cannot contain color codes
-            if (!teamName.matches("^[a-zA-Z0-9_]+$")) {
-                plugin.getMessageManager().sendMessage(player, "invalid_team_name");
-                return;
-            }
-            String plainName = teamName;
-            String lowerName = plainName.toLowerCase();
-            String[] inappropriate = {"admin", "mod", "staff", "owner", "server", "minecraft", "bukkit", "spigot"};
-            for (String word : inappropriate) {
-                if (lowerName.contains(word)) {
-                    plugin.getMessageManager().sendMessage(player, "invalid_team_name");
-                    return;
-                }
-            }
+        // ID (Name) cannot contain color codes or special characters
+        if (!teamName.matches("^[a-zA-Z0-9_]+$")) {
+            plugin.getMessageManager().sendMessage(player, "invalid_team_name");
+            return;
+        }
+
+        if (!validateTeamNameAndTag(teamName, teamTag)) {
+            plugin.getMessageManager().sendMessage(player, "invalid_team_name_or_tag");
+            return;
         }
         
         if (teamManager.getPlayerTeam(player.getUniqueId()) != null) {
@@ -1154,15 +1138,9 @@ public class TeamCommand implements CommandExecutor, TabCompleter {
         plugin.getMessageManager().sendMessage(player, "help_format",
             Placeholder.unparsed("command", "gui"),
             Placeholder.unparsed("description", "Opens the team GUI."));
-        if (plugin.getConfigManager().isTeamTagEnabled()) {
-            plugin.getMessageManager().sendMessage(player, "help_format",
-                Placeholder.unparsed("command", "create <name> <tag>"),
-                Placeholder.unparsed("description", "Creates a team."));
-        } else {
-            plugin.getMessageManager().sendMessage(player, "help_format",
-                Placeholder.unparsed("command", "create <name>"),
-                Placeholder.unparsed("description", "Creates a team."));
-        }
+        plugin.getMessageManager().sendMessage(player, "help_format",
+            Placeholder.unparsed("command", "create <name>"),
+            Placeholder.unparsed("description", "Creates a team."));
         plugin.getMessageManager().sendMessage(player, "help_format",
             Placeholder.unparsed("command", "disband"),
             Placeholder.unparsed("description", "Disbands your team."));

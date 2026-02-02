@@ -1107,6 +1107,13 @@ public class TeamManager {
             messageManager.sendMessage(player, "tag_invalid");
             return;
         }
+
+        // Check if tag is already taken
+        if (storage.findTeamByTag(newTag).isPresent()) {
+            messageManager.sendMessage(player, "team_tag_exists", Placeholder.unparsed("tag", newTag));
+            return;
+        }
+
         team.setTag(newTag);
         plugin.getTaskRunner().runAsync(() -> storage.setTeamTag(team.getId(), newTag));
         markTeamModified(team.getId());
