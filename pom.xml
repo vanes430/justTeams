@@ -76,15 +76,15 @@
                                 </filter>
                                 <filter>
                                     <artifact>com.h2database:h2</artifact>
-                                    <excludes>
-                                        <exclude>META-INF/services/java.sql.Driver</exclude>
-                                    </excludes>
+                                    <includes>
+                                        <include>**</include>
+                                    </includes>
                                 </filter>
                                 <filter>
                                     <artifact>com.mysql:mysql-connector-j</artifact>
-                                    <excludes>
-                                        <exclude>META-INF/services/java.sql.Driver</exclude>
-                                    </excludes>
+                                    <includes>
+                                        <include>**</include>
+                                    </includes>
                                 </filter>
                             </filters>
                         </configuration>
